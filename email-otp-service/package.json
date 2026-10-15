@@ -1,0 +1,27 @@
+{
+  "name": "email-otp-service",
+  "version": "1.0.0",
+  "description": "Dịch vụ độc lập tạo và xác thực mã OTP 6 số qua Email (Nodemailer, Redis, Express)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "otp",
+    "email",
+    "verification",
+    "nodemailer",
+    "redis",
+    "microservice"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ioredis": "^5.4.2",
+    "nodemailer": "^6.10.0"
+  }
+}

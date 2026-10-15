@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  # 1. Dịch vụ lưu trữ RAM Redis
+  redis:
+    image: redis:7-alpine
+    container_name: otp-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_otp_data:/data
+
+  # 2. Dịch vụ xác thực Email OTP
+  otp-service:
+    build: .
+    container_name: otp-service
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - SMTP_HOST=smtp.gmail.com
+      - SMTP_PORT=587
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM}
+      - OTP_EXPIRY_SECONDS=300
+      - OTP_COOLDOWN_SECONDS=60
+      - OTP_MAX_ATTEMPTS=5
+    depends_on:
+      - redis
+
+volumes:
+  redis_otp_data:

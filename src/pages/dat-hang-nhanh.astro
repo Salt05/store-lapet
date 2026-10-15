@@ -1,0 +1,742 @@
+---
+// src/pages/dat-hang-nhanh.astro
+export const prerender = false;
+
+import BaseLayout from '@/layouts/BaseLayout.astro';
+
+const auth = Astro.locals.auth;
+
+const isAuthenticated = auth?.isAuthenticated === true;
+const isDealer = auth?.isDealer === true;
+
+interface ProductGroup {
+  id: string | number;
+  slug: string;
+  name: string;
+}
+
+const PUBLIC_DIRECTUS_URL =
+  import.meta.env.PUBLIC_DIRECTUS_URL || 'http://192.168.1.110:8055';
+
+let products: any[] = [];
+let productGroups: ProductGroup[] = [];
+let fetchError = false;
+
+try {
+  // Đồng bộ cấu trúc fields query theo file san-pham/index.astro để lấy đầy đủ các quan hệ nhóm/danh mục
+  const [resGroups, resProducts] = await Promise.all([
+    fetch(`${PUBLIC_DIRECTUS_URL}/items/product_groups?limit=-1&fields=id,name,slug`),
+    fetch(
+      `${PUBLIC_DIRECTUS_URL}/items/products?limit=-1&fields=id,odoo_id,sku,name,slug,price,wholesale_price,sold_quantity,images.directus_files_id,images.id,product_groups.*,group.*,groups.*,categories.*,category.*`
+    )
+  ]);
+
+  if (resGroups.ok) {
+    const jsonGroups = await resGroups.json();
+    if (Array.isArray(jsonGroups.data)) {
+      productGroups = jsonGroups.data.map((g: any): ProductGroup => ({
+        id: g.id,
+        slug: g.slug || `group-${g.id}`,
+        name: g.name || g.title || `Nhóm ${g.id}`
+      }));
+    }
+  }
+
+  if (resProducts.ok) {
+    const jsonProducts = await resProducts.json();
+    const rawProducts = jsonProducts.data || [];
+
+    // Loại bỏ sản phẩm trùng lặp id
+    const uniqueMap = new Map();
+    rawProducts.forEach((item: any) => {
+      if (item && item.id && !uniqueMap.has(item.id)) {
+        uniqueMap.set(item.id, item);
+      }
+    });
+    products = Array.from(uniqueMap.values());
+  } else {
+    fetchError = true;
+  }
+} catch (error) {
+  console.error('❌ Lỗi kết nối Directus:', error);
+  fetchError = true;
+}
+
+function parseOdooId(val: any): number | null {
+  if (val === null || val === undefined) return null;
+  const parsed = parseInt(String(val), 10);
+  return isNaN(parsed) ? null : parsed;
+}
+
+// Logic kiểm tra nhóm chuẩn xác từ file san-pham/index.astro
+function isProductInGroup(product: any, group: { id: string | number; slug: string }): boolean {
+  if (!product) return false;
+
+  const possibleFields = [
+    product.product_groups,
+    product.group,
+    product.groups,
+    product.categories,
+    product.category
+  ];
+
+  for (const field of possibleFields) {
+    if (!field) continue;
+
+    if (Array.isArray(field)) {
+      for (const item of field) {
+        if (!item) continue;
+        if (item === group.id || item === group.slug) return true;
+        
+        if (typeof item === 'object') {
+          const target = item.product_groups_id || item.group_id || item.id || item;
+          if (target === group.id || target.slug === group.slug || target.id === group.id) {
+            return true;
+          }
+        }
+      }
+    }
+
+    if (typeof field === 'object' && field !== null) {
+      const target = field.product_groups_id || field.group_id || field;
+      if (
+        target === group.id ||
+        target.id === group.id ||
+        target.slug === group.slug
+      ) {
+        return true;
+      }
+    }
+
+    if (field === group.id || field === group.slug) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function getProductGroupSlugs(product: any): string {
+  const matchedSlugs: string[] = [];
+
+  productGroups.forEach((group) => {
+    if (isProductInGroup(product, group)) {
+      matchedSlugs.push(group.slug);
+    }
+  });
+
+  return matchedSlugs.length > 0 ? matchedSlugs.join(' ') : 'none';
+}
+
+function getProductImage(product: any) {
+  if (!product.images || !Array.isArray(product.images) || product.images.length === 0) {
+    return 'https://placehold.co/400x400/fef3df/083a3c?text=LA+PET';
+  }
+
+  const firstImg = product.images[0];
+  let fileId = null;
+
+  if (typeof firstImg === 'string') {
+    fileId = firstImg;
+  } else if (typeof firstImg?.directus_files_id === 'string') {
+    fileId = firstImg.directus_files_id;
+  } else if (firstImg?.directus_files_id?.id) {
+    fileId = firstImg.directus_files_id.id;
+  } else if (firstImg?.id) {
+    fileId = firstImg.id;
+  }
+
+  if (!fileId) return 'https://placehold.co/400x400/fef3df/083a3c?text=LA+PET';
+  return `${PUBLIC_DIRECTUS_URL}/assets/${fileId}`;
+}
+
+function formatPrice(price: number) {
+  if (typeof price !== 'number' || isNaN(price)) return '0đ';
+  return price.toLocaleString('vi-VN') + 'đ';
+}
+---
+
+<BaseLayout title="Đặt hàng nhanh - LaPet">
+
+<!-- Element truyền trạng thái isDealer từ SSR sang Client -->
+<div
+  id="quick-order-auth"
+  data-is-dealer={isDealer ? "true" : "false"}
+  hidden
+></div>
+
+  <main class="bg-[#f7f8fa] min-h-screen py-4 md:py-8 px-2 md:px-4 font-sans pb-28 lg:pb-8">
+    <div class="max-w-7xl mx-auto space-y-6">
+      <div class="grid lg:grid-cols-[1fr_320px] gap-6">
+
+        <!-- Cột sản phẩm -->
+<div class="space-y-4">
+  <!-- Thanh tìm kiếm & Lọc nhóm -->
+  <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs space-y-3">
+    <div class="flex flex-col sm:flex-row gap-3">
+      <input 
+        id="search" 
+        type="text" 
+        placeholder="Tìm theo tên sản phẩm, SKU... (Ctrl + K)" 
+        class="flex-1 rounded-xl border border-slate-300 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-[#23c1c6] text-sm"
+      />
+      <select id="group-select" class="rounded-xl border border-slate-300 px-4 py-3 bg-white text-sm font-medium cursor-pointer">
+        <option value="all">Tất cả nhóm ({products.length})</option>
+        {productGroups.map((group) => {
+          const count = products.filter((p) => isProductInGroup(p, group)).length;
+          return (
+            <option value={group.slug}>
+              {group.name} ({count})
+            </option>
+          );
+        })}
+      </select>
+      <select id="sort-select" class="rounded-xl border border-slate-300 px-4 py-3 bg-white text-sm font-medium cursor-pointer">
+        <option value="default">Mặc định</option>
+        <option value="best-seller">Bán chạy nhất</option>
+        <option value="price-asc">Giá tăng dần</option>
+        <option value="price-desc">Giá giảm dần</option>
+        <option value="name-asc">Tên A-Z</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Thông báo lỗi kết nối -->
+  {fetchError && (
+    <div class="bg-red-50 text-red-600 p-5 rounded-2xl border border-red-200 text-sm font-medium text-center">
+      Không thể kết nối đến hệ thống dữ liệu sản phẩm ({PUBLIC_DIRECTUS_URL}).
+    </div>
+  )}
+
+  {!fetchError && (
+    <div class="bg-white md:rounded-2xl border border-slate-200 overflow-hidden shadow-2xs">
+      <!-- Header Bảng (Desktop) -->
+      <div class="hidden md:grid grid-cols-[80px_1.6fr_140px_140px_120px] bg-slate-50 border-b border-slate-200 px-5 py-3 text-xs font-bold uppercase text-slate-500">
+        <div>Ảnh</div>
+        <div>Sản phẩm</div>
+        <div>Giá</div>
+        <div class="text-center">Số lượng</div>
+        <div>Thao tác</div>
+      </div>
+
+      <!-- Danh sách sản phẩm -->
+      <div id="list" class="divide-y divide-slate-100">
+        {products.map((p) => {
+          const productImage = getProductImage(p);
+          const groupSlugs = getProductGroupSlugs(p);
+          const parsedOdooId = parseOdooId(p.odoo_id);
+
+          // Pricing SSR
+          const retailPrice = Number(p.price) || 0;
+          const wholesalePrice = Number(p.wholesale_price) || 0;
+          const hasWholesale = isDealer && wholesalePrice > 0;
+          const activePrice = hasWholesale ? wholesalePrice : retailPrice;
+
+          // Lượt bán
+          const totalSold = (Number(p.sold_count) || 0) + (Number(p.sold_quantity) || 0);
+
+          return (
+            <div 
+              class="product p-3 md:px-5 md:py-4 hover:bg-slate-50/60 transition-colors" 
+              data-name={(p.name || "").toLowerCase()} 
+              data-groups={groupSlugs}
+              data-id={p.id} 
+              data-odoo-id={parsedOdooId !== null ? parsedOdooId : ''}
+              data-sku={p.sku || ''}
+              data-price={activePrice}
+              data-sold={totalSold}
+              data-retail-price={retailPrice}
+              data-wholesale-price={wholesalePrice}
+              data-image={productImage}
+            >
+              <!-- Desktop Layout -->
+              <div class="hidden md:grid grid-cols-[80px_1.6fr_140px_140px_120px] gap-4 items-center">
+                <div class="w-20 h-20 bg-slate-100 rounded-xl flex items-center justify-center p-2 overflow-hidden shrink-0">
+                  <img 
+                    src={productImage} 
+                    alt={p.name} 
+                    loading="lazy"
+                    class="w-full h-full object-contain"
+                    onerror="this.onerror=null; this.src='https://placehold.co/400x400/fef3df/083a3c?text=LA+PET';"
+                  />
+                </div>
+
+                <div class="min-w-0">
+                  <!-- HIỂN THỊ LƯỢT BÁN TRÊN TÊN (DESKTOP) -->
+                  {totalSold > 0 && (
+                    <div class="flex items-center gap-1 mb-0.5 text-xs text-amber-600 font-medium">
+                      <span>🔥</span>
+                      <span>Đã bán {totalSold.toLocaleString('vi-VN')}</span>
+                    </div>
+                  )}
+                  <a href={`/san-pham/${p.slug}`} class="font-semibold text-slate-800 hover:text-[#d82a72] transition-colors block truncate">
+                    {p.name}
+                  </a>
+                  {p.sku && <div class="text-[11px] text-slate-400 mt-0.5">SKU: {p.sku}</div>}
+                </div>
+
+                <div class="flex flex-col justify-center">
+                  <span class={`product-price-label font-bold ${hasWholesale ? 'text-[#d82a72]' : 'text-slate-800'}`}>
+                    {formatPrice(activePrice)}
+                  </span>
+                  {hasWholesale && retailPrice > wholesalePrice && (
+                    <span class="product-price-strike text-xs text-slate-400 line-through">
+                      {formatPrice(retailPrice)}
+                    </span>
+                  )}
+                </div>
+
+                <div class="flex items-center justify-center gap-2">
+                  <button type="button" class="minus w-9 h-9 rounded-full border border-slate-200 hover:bg-slate-100 transition flex items-center justify-center font-bold text-slate-600 cursor-pointer">
+                    −
+                  </button>
+                  <input type="number" class="qty w-12 text-center bg-transparent border border-slate-200 rounded-md py-1 font-bold text-slate-800 focus:ring-1 focus:ring-[#23c1c6]" value="1" min="1" />
+                  <button type="button" class="plus w-9 h-9 rounded-full border border-slate-200 hover:bg-slate-100 transition flex items-center justify-center font-bold text-slate-600 cursor-pointer">
+                    +
+                  </button>
+                </div>
+
+                <div>
+                  <button type="button" class="add w-auto px-4 py-2 bg-[#fde8ef] hover:bg-[#fbd1df] text-[#d82a72] rounded-full font-semibold transition flex items-center justify-center gap-2 cursor-pointer text-sm">
+                    Thêm
+                  </button>
+                </div>
+              </div>
+
+              <!-- Mobile Layout -->
+              <div class="md:hidden flex items-center justify-between gap-2 py-1">
+                <div class="flex items-center gap-3 min-w-0 flex-1">
+                  <div class="w-14 h-14 bg-slate-100 rounded-xl flex items-center justify-center p-1.5 overflow-hidden shrink-0">
+                    <img 
+                      src={productImage} 
+                      alt={p.name} 
+                      loading="lazy"
+                      class="w-full h-full object-contain"
+                      onerror="this.onerror=null; this.src='https://placehold.co/400x400/fef3df/083a3c?text=LA+PET';"
+                    />
+                  </div>
+
+                  <div class="min-w-0 flex-1">
+                    <!-- HIỂN THỊ LƯỢT BÁN TRÊN TÊN (MOBILE) -->
+                    {totalSold > 0 && (
+                      <div class="flex items-center gap-1 mb-0.5 text-[11px] text-amber-600 font-medium">
+                        <span class="text-[10px]">🔥</span>
+                        <span>Đã bán {totalSold.toLocaleString('vi-VN')}</span>
+                      </div>
+                    )}
+                    <a href={`/san-pham/${p.slug}`} class="font-medium text-xs text-slate-800 line-clamp-1 leading-tight">
+                      {p.name}
+                    </a>
+                    <div class="flex items-center gap-1.5 mt-1">
+                      <span class={`product-price-label font-bold text-xs ${hasWholesale ? 'text-[#d82a72]' : 'text-slate-800'}`}>
+                        {formatPrice(activePrice)}
+                      </span>
+                      {hasWholesale && retailPrice > wholesalePrice && (
+                        <span class="product-price-strike text-[11px] text-slate-400 line-through">
+                          {formatPrice(retailPrice)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <div class="flex items-center bg-slate-100 border border-slate-200 rounded-full px-1 py-0.5">
+                    <button type="button" class="minus w-6 h-6 rounded-full flex items-center justify-center text-slate-600 font-bold text-xs cursor-pointer">
+                      −
+                    </button>
+                    <input type="number" class="qty w-6 text-center bg-transparent border-none outline-none font-bold text-xs text-slate-800" value="1" min="1" />
+                    <button type="button" class="plus w-6 h-6 rounded-full flex items-center justify-center text-slate-600 font-bold text-xs cursor-pointer">
+                      +
+                    </button>
+                  </div>
+
+                  <button type="button" class="add px-3 py-1.5 bg-[#fde8ef] hover:bg-[#fbd1df] text-[#d82a72] rounded-full text-xs font-semibold transition cursor-pointer">
+                    Mua
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {products.length === 0 && (
+        <div class="p-10 text-center text-slate-500">Chưa có sản phẩm nào trong hệ thống.</div>
+      )}
+      <div id="empty" class="hidden p-10 text-center text-slate-500">Không tìm thấy sản phẩm phù hợp.</div>
+    </div>
+  )}
+</div>
+
+        <!-- Sidebar đơn hàng (Desktop) -->
+        <aside class="hidden lg:block lg:sticky lg:top-8 h-fit">
+          <div class="bg-white rounded-2xl border border-slate-200 p-5 space-y-5 shadow-2xs">
+            <div>
+              <h2 class="font-bold text-slate-800">Đơn hàng hiện tại</h2>
+              <p class="text-xs text-slate-500 mt-1">Tóm tắt các sản phẩm đã thêm.</p>
+            </div>
+
+            <div id="mini-cart" class="space-y-3 max-h-72 overflow-y-auto pr-1">
+              <p class="text-sm text-slate-400 text-center py-8">Chưa có sản phẩm.</p>
+            </div>
+
+            <div class="border-t border-slate-200 pt-4 space-y-2">
+              <div class="flex justify-between text-sm text-slate-600">
+                <span>Tổng số lượng</span>
+                <span id="sum-qty" class="font-bold text-slate-900">0</span>
+              </div>
+              <div class="flex justify-between text-lg font-black">
+                <span class="text-slate-900">Tạm tính</span>
+                <span id="sum-price" class="text-[#d82a72]">0đ</span>
+              </div>
+            </div>
+
+            <button 
+              id="open-cart"
+              type="button" 
+              class="block text-center w-full bg-[#083a3c] hover:bg-[#062b2d] text-[#ffffff] py-3 rounded-xl font-bold uppercase text-sm transition-colors cursor-pointer"
+            >
+              Xem giỏ hàng
+            </button>
+          </div>
+        </aside>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom Cart Bar Mobile -->
+  <div class="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 py-3 flex items-center justify-between z-40 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+    <div>
+      <p class="text-xs text-slate-500">Giỏ hàng (<span id="mobile-count" class="font-bold text-slate-800">0</span> sản phẩm)</p>
+      <p class="text-base font-black text-[#d82a72]" id="mobile-total">0đ</p>
+    </div>
+    <button 
+      id="mobile-open-cart"
+      type="button"
+      class="bg-[#083a3c] hover:bg-[#062b2d] text-[#ffffff] px-5 py-2.5 rounded-full font-bold text-sm transition-colors shadow-sm text-center cursor-pointer"
+    >
+      Xem giỏ hàng
+    </button>
+  </div>
+</BaseLayout>
+
+<style>
+  input[type=number]::-webkit-inner-spin-button, 
+  input[type=number]::-webkit-outer-spin-button { 
+    -webkit-appearance: none; 
+    margin: 0; 
+  }
+</style>
+
+<script>
+const authEl = document.getElementById("quick-order-auth");
+const isDealer = authEl?.dataset.isDealer === "true";
+
+const getCart = () => {  
+  try { return JSON.parse(localStorage.getItem("cart") || "[]"); } catch { return []; }
+};
+
+const saveCart = (cart: any[]) => {
+  localStorage.setItem("cart", JSON.stringify(cart));
+  window.dispatchEvent(new Event("cart-updated"));
+};
+
+function initQuickOrder() {
+  const listContainer = document.getElementById("list");
+  let items = Array.from(document.querySelectorAll(".product")) as HTMLElement[];
+  const searchInput = document.getElementById("search") as HTMLInputElement | null;
+  const groupSelect = document.getElementById("group-select") as HTMLSelectElement | null;
+  const sortSelect = document.getElementById("sort-select") as HTMLSelectElement | null;
+  const emptyEl = document.getElementById("empty");
+  const sumQtyEl = document.getElementById("sum-qty");
+  const sumPriceEl = document.getElementById("sum-price");
+  const miniCartEl = document.getElementById("mini-cart");
+  const openCartBtn = document.getElementById("open-cart");
+  const mobileCountEl = document.getElementById("mobile-count");
+  const mobileTotalEl = document.getElementById("mobile-total");
+  const mobileOpenCartBtn = document.getElementById("mobile-open-cart");
+
+  // Phím tắt Ctrl + K / Cmd + K
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      searchInput?.focus();
+    }
+  };
+  window.removeEventListener('keydown', handleKeyDown);
+  window.addEventListener('keydown', handleKeyDown);
+
+  const syncCartPricing = () => {
+    const cart = getCart();
+    let changed = false;
+
+    const syncedCart = cart.map((item: any) => {
+      const oldPrice = Number(item.price) || 0;
+      let newPrice = oldPrice;
+
+      if (isDealer) {
+        newPrice = Number(item.wholesale_price) > 0 
+          ? Number(item.wholesale_price) 
+          : (Number(item.retail_price) || 0);
+      } else {
+        newPrice = Number(item.retail_price) || 0;
+      }
+
+      if (oldPrice !== newPrice) {
+        changed = true;
+      }
+
+      return {
+        ...item,
+        price: newPrice
+      };
+    });
+
+    if (changed) {
+      localStorage.setItem("cart", JSON.stringify(syncedCart));
+    }
+
+    return syncedCart;
+  };
+
+  const renderCartUI = () => {
+    const cart = syncCartPricing();
+    const totalQty = cart.reduce((acc: number, item: any) => acc + (item.quantity || 1), 0);
+    const totalPrice = cart.reduce((acc: number, item: any) => acc + ((item.quantity || 1) * (item.price || 0)), 0);
+    
+    if (sumQtyEl) sumQtyEl.textContent = totalQty.toString();
+    if (sumPriceEl) sumPriceEl.textContent = totalPrice.toLocaleString("vi-VN") + "đ";
+    if (mobileCountEl) mobileCountEl.textContent = totalQty.toString();
+    if (mobileTotalEl) mobileTotalEl.textContent = totalPrice.toLocaleString("vi-VN") + "đ";
+    
+    if (miniCartEl) {
+      if (cart.length === 0) {
+        miniCartEl.innerHTML = '<p class="text-sm text-slate-400 text-center py-8">Chưa có sản phẩm.</p>';
+      } else {
+        miniCartEl.innerHTML = cart.map((item: any) => `
+          <div class="flex items-center gap-3 bg-slate-50 p-2 rounded-xl" data-cart-id="${item.id}">
+            <img src="${item.image}" class="w-10 h-10 rounded-lg object-contain bg-white p-1 shrink-0 border border-slate-100" />
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-semibold truncate text-slate-800">${item.name}</p>
+              <div class="flex items-center gap-2 mt-1">
+                <span class="text-[11px] font-bold text-[#d82a72]">${((item.quantity || 1) * (item.price || 0)).toLocaleString("vi-VN")}đ</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <button type="button" class="cart-minus w-6 h-6 rounded-md bg-white border border-slate-200 hover:bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600 cursor-pointer">−</button>
+              <span class="text-xs font-bold w-5 text-center text-slate-800">${item.quantity}</span>
+              <button type="button" class="cart-plus w-6 h-6 rounded-md bg-white border border-slate-200 hover:bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-600 cursor-pointer">+</button>
+              <button type="button" class="cart-remove w-6 h-6 rounded-md text-red-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center ml-1 cursor-pointer" title="Xóa sản phẩm">
+                <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/></svg>
+              </button>
+            </div>
+          </div>
+        `).join("");
+        attachCartItemEvents();
+      }
+    }
+  };
+
+  (window as any).renderCartUI = renderCartUI;
+
+  const attachCartItemEvents = () => {
+    if (!miniCartEl) return;
+    miniCartEl.querySelectorAll("[data-cart-id]").forEach(el => {
+      const element = el as HTMLElement;
+      const id = element.dataset.cartId;
+      
+      element.querySelector(".cart-minus")?.addEventListener("click", () => {
+        let cart = getCart();
+        const target = cart.find((x: any) => x.id === id);
+        if (target) {
+          target.quantity -= 1;
+          if (target.quantity <= 0) cart = cart.filter((x: any) => x.id !== id);
+          saveCart(cart);
+          renderCartUI();
+        }
+      });
+
+      element.querySelector(".cart-plus")?.addEventListener("click", () => {
+        const cart = getCart();
+        const target = cart.find((x: any) => x.id === id);
+        if (target) {
+          target.quantity += 1;
+          saveCart(cart);
+          renderCartUI();
+        }
+      });
+
+      element.querySelector(".cart-remove")?.addEventListener("click", () => {
+        let cart = getCart();
+        cart = cart.filter((x: any) => x.id !== id);
+        saveCart(cart);
+        renderCartUI();
+      });
+    });
+  };
+
+  // Logic lọc kết hợp Từ khóa + Nhóm sản phẩm
+  const filterProducts = () => {
+    const keyword = searchInput?.value.toLowerCase().trim() || "";
+    const selectedGroup = groupSelect?.value || "all";
+    let matchCount = 0;
+
+    items.forEach((el) => {
+      const name = el.dataset.name || "";
+      const sku = (el.dataset.sku || "").toLowerCase();
+      const groups = (el.dataset.groups || "").split(" ");
+
+      const matchesSearch = name.includes(keyword) || sku.includes(keyword);
+      const matchesGroup = selectedGroup === "all" || groups.includes(selectedGroup);
+
+      const isVisible = matchesSearch && matchesGroup;
+      el.classList.toggle("hidden", !isVisible);
+      if (isVisible) matchCount++;
+    });
+
+    if (emptyEl) emptyEl.classList.toggle("hidden", matchCount !== 0);
+  };
+
+  let searchTimer: any;
+  searchInput?.addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(filterProducts, 150);
+  });
+
+  groupSelect?.addEventListener("change", filterProducts);
+
+  // Sắp xếp sản phẩm
+  sortSelect?.addEventListener("change", () => {
+    if (!listContainer) return;
+    const mode = sortSelect.value;
+
+    items.sort((a, b) => {
+      const pA = parseFloat(a.dataset.price || "0");
+      const pB = parseFloat(b.dataset.price || "0");
+      const sA = parseInt(a.dataset.sold || "0", 10);
+      const sB = parseInt(b.dataset.sold || "0", 10);
+      const nA = a.dataset.name || "";
+      const nB = b.dataset.name || "";
+
+      if (mode === "best-seller") return sB - sA;
+      if (mode === "price-asc") return pA - pB;
+      if (mode === "price-desc") return pB - pA;
+      if (mode === "name-asc") return nA.localeCompare(nB);
+      return 0;
+    });
+
+    items.forEach(item => listContainer.appendChild(item));
+  });
+
+  items.forEach(row => {
+    const qtyInputs = row.querySelectorAll(".qty") as NodeListOf<HTMLInputElement>;
+    const minusBtns = row.querySelectorAll(".minus");
+    const plusBtns = row.querySelectorAll(".plus");
+    const addBtns = row.querySelectorAll(".add");
+
+    qtyInputs.forEach(input => {
+      const handleQtyChange = () => {
+        let val = parseInt(input.value || "1", 10);
+        if (isNaN(val) || val < 1) val = 1;
+        qtyInputs.forEach(i => i.value = val.toString());
+      };
+      input.addEventListener("input", handleQtyChange);
+      input.addEventListener("change", handleQtyChange);
+    });
+
+    minusBtns.forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        let currentVal = parseInt(qtyInputs[0]?.value || "1", 10);
+        let newVal = Math.max(1, currentVal - 1);
+        qtyInputs.forEach(input => input.value = newVal.toString());
+      });
+    });
+
+    plusBtns.forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        let currentVal = parseInt(qtyInputs[0]?.value || "1", 10);
+        let newVal = currentVal + 1;
+        qtyInputs.forEach(input => input.value = newVal.toString());
+      });
+    });
+
+    addBtns.forEach(addBtn => {
+      addBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        const cart = getCart();
+        const id = row.dataset.id;
+        const rawOdoo = row.dataset.odooId;
+        
+        let parsedOdooId = null;
+        if (rawOdoo && rawOdoo !== 'null') {
+          const num = parseInt(rawOdoo, 10);
+          if (!isNaN(num)) parsedOdooId = num;
+        }
+
+        const sku = row.dataset.sku || '';
+        const wholesalePrice = parseFloat(row.dataset.wholesalePrice || "0");
+        const retailPrice = parseFloat(row.dataset.retailPrice || "0");
+        const activePrice = parseFloat(row.dataset.price || "0");
+
+        let addedQty = parseInt(qtyInputs[0]?.value || "1", 10);
+        if (isNaN(addedQty) || addedQty < 1) addedQty = 1;
+
+        const linkEl = row.querySelector("a");
+        const targetItem = cart.find((x: any) => x.id === id);
+
+        if (targetItem) {
+          targetItem.quantity = (targetItem.quantity || 1) + addedQty;
+          targetItem.price = activePrice;
+          targetItem.wholesale_price = wholesalePrice;
+          targetItem.retail_price = retailPrice;
+          if (targetItem.odoo_id === undefined) targetItem.odoo_id = parsedOdooId;
+          if (!targetItem.sku) targetItem.sku = sku;
+        } else {
+          cart.push({
+            id,
+            odoo_id: parsedOdooId,
+            sku,
+            name: linkEl ? linkEl.textContent?.trim() : "",
+            price: activePrice,
+            wholesale_price: wholesalePrice,
+            retail_price: retailPrice,
+            image: row.dataset.image,
+            quantity: addedQty
+          });
+        }
+
+        saveCart(cart);
+        renderCartUI();
+        qtyInputs.forEach(input => { input.value = "1"; });
+
+        addBtn.classList.add("scale-95", "bg-[#d82a72]", "text-white");
+        setTimeout(() => addBtn.classList.remove("scale-95", "bg-[#d82a72]", "text-white"), 180);
+      });
+    });
+  });
+
+  const triggerOpenCart = () => window.location.href = "/gio-hang";
+  openCartBtn?.addEventListener("click", triggerOpenCart);
+  mobileOpenCartBtn?.addEventListener("click", triggerOpenCart);
+
+  window.removeEventListener("cart-updated", renderCartUI);
+  window.addEventListener("cart-updated", renderCartUI);
+
+  renderCartUI();
+}
+
+window.addEventListener("auth-changed", () => {
+  window.location.reload();
+});
+
+if (document.readyState !== "loading") {
+  initQuickOrder();
+} else {
+  document.addEventListener("DOMContentLoaded", initQuickOrder);
+}
+document.addEventListener("astro:page-load", initQuickOrder);
+</script>

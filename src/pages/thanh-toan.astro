@@ -1,0 +1,927 @@
+---
+export const prerender = false;
+import BaseLayout from '@/layouts/BaseLayout.astro';
+
+const orderSteps = [
+  { id: 'sent', title: 'Gửi yêu cầu', status: 'completed' },
+  { id: 'confirmed', title: 'Xác nhận đơn', status: 'active' },
+  { id: 'preparing', title: 'Chuẩn bị hàng', status: 'pending' },
+  { id: 'shipping', title: 'Đang giao hàng', status: 'pending' },
+  { id: 'done', title: 'Hoàn tất', status: 'pending' }
+];
+
+const activeIndex = orderSteps.findIndex((step) => step.status === 'active');
+const progressWidth = activeIndex >= 0 ? (activeIndex / (orderSteps.length - 1)) * 100 : 0;
+---
+
+<BaseLayout title="Xác nhận Đơn hàng Đại lý - LaPet">
+  <main class="bg-[#f7f8fa] min-h-screen pb-32 lg:pb-12 font-sans">
+    <div class="max-w-7xl mx-auto px-4 py-6 lg:py-8 space-y-6">
+
+      <!-- HERO -->
+      <section class="bg-[#083a3c] rounded-3xl text-white p-6 shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="bg-teal-500/20 text-teal-300 text-xs font-bold px-3 py-1 rounded-full border border-teal-400/30">Kênh Đại Lý</span>
+              <span class="text-xs text-teal-200/90 font-medium">Mã ĐL: <span id="hero-dealer-code">...</span></span>
+            </div>
+            <h1 class="text-2xl lg:text-3xl font-black">Xác nhận Đơn hàng Đại lý</h1>
+            <p class="text-teal-100/80 text-sm mt-1">Kiểm tra thông tin chiết khấu và gửi yêu cầu xác nhận báo giá.</p>
+          </div>
+          <a href="/gio-hang" class="px-5 py-2.5 rounded-full bg-white/10 hover:bg-white/20 transition text-sm font-semibold flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+            Quay lại giỏ hàng
+          </a>
+        </div>
+      </section>
+
+      <!-- MAIN FORM -->
+      <form id="b2b-checkout-form" onsubmit="return false;">
+        <div class="grid lg:grid-cols-[1fr_400px] gap-6">
+
+          <!-- LEFT COLUMN -->
+          <div class="space-y-6">
+            <!-- THÔNG TIN ĐẠI LÝ -->
+            <section class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs">
+              <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
+                <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <svg class="w-5 h-5 text-[#083a3c]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                  Thông tin Đại lý
+                </h2>
+                <span class="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-200/60 flex items-center gap-1.5">
+                  <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                  Đã xác thực hệ thống
+                </span>
+              </div>
+
+              <div class="bg-slate-50 rounded-xl p-4 border border-slate-200/60 grid md:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p class="text-xs text-slate-500 font-medium">Tên Doanh nghiệp</p>
+                  <p id="partner-name" class="font-bold text-slate-900 text-base mt-0.5">Đang tải...</p>
+                </div>
+                <div>
+                  <p class="text-xs text-slate-500 font-medium">Mã đại lý</p>
+                  <p id="partner-code" class="font-semibold text-slate-700 mt-0.5">...</p>
+                </div>
+                <div>
+                  <p class="text-xs text-slate-500 font-medium">Mã số thuế</p>
+                  <p id="partner-vat" class="font-semibold text-slate-700 mt-0.5">...</p>
+                </div>
+                <div>
+                  <p class="text-xs text-slate-500 font-medium">Số điện thoại / Email</p>
+                  <p id="partner-contact" class="font-semibold text-slate-700 mt-0.5">...</p>
+                </div>
+                <div>
+                  <p class="text-xs text-slate-500 font-medium">Bảng giá áp dụng</p>
+                  <p id="partner-pricelist" class="font-bold text-[#083a3c] mt-0.5">...</p>
+                </div>
+              </div>
+            </section>
+
+            <!-- ĐỊA CHỈ GIAO HÀNG -->
+            <section class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <svg class="w-5 h-5 text-[#083a3c]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                  Địa chỉ giao hàng
+                </h2>
+                <button type="button" id="toggle-address-panel" class="text-xs font-bold text-[#083a3c] hover:text-[#d82a72] transition flex items-center gap-1 cursor-pointer">
+                  <span>Thay đổi địa chỉ giao hàng</span>
+                  <svg id="chevron-icon" class="w-4 h-4 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+              </div>
+
+              <!-- ĐỊA CHỈ ĐANG CHỌN -->
+              <div id="default-address-display" class="p-4 bg-slate-50 rounded-xl border border-slate-200/60 text-sm space-y-1">
+                <p id="shipping-name" class="font-bold text-slate-900">...</p>
+                <p id="shipping-street" class="text-slate-700">...</p>
+              </div>
+
+              <!-- PANEL THAY ĐỔI ĐỊA CHỈ -->
+              <div id="custom-address-panel" class="hidden mt-4 pt-4 border-t border-dashed border-slate-200 space-y-4">
+                <div class="flex items-center gap-6 text-xs font-semibold text-slate-700">
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="address_option" value="saved" checked class="accent-[#083a3c] w-4 h-4" />
+                    <span>Chọn từ danh sách đã lưu</span>
+                  </label>
+                  <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="radio" name="address_option" value="custom" class="accent-[#083a3c] w-4 h-4" />
+                    <span>Nhập địa chỉ mới</span>
+                  </label>
+                </div>
+
+                <div id="saved-address-group" class="space-y-1">
+                  <label class="block text-xs font-bold text-slate-700">Địa chỉ kho/nhận hàng:</label>
+                  <select id="shipping-address-select" class="input w-full px-3 py-2 border rounded-xl text-sm">
+                    <option value="">-- Mặc định (Địa chỉ chính) --</option>
+                  </select>
+                </div>
+
+                <div id="custom-address-group" class="hidden space-y-3">
+                  <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Tên người nhận</label>
+                    <input type="text" id="custom-recipient-name" placeholder="Ví dụ: Nguyễn Văn A" class="input w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#083a3c]" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Số điện thoại người nhận</label>
+                    <input type="tel" id="custom-recipient-phone" placeholder="Ví dụ: 0901234567" class="input w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#083a3c]" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">Địa chỉ giao hàng chi tiết</label>
+                    <textarea id="custom-street-address" rows="2" placeholder="Số nhà, tên đường, phường/xã, quận/huyện..." class="input w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#083a3c]"></textarea>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <!-- RIGHT COLUMN -->
+          <aside class="lg:sticky lg:top-8 h-fit">
+            <div class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-2xs space-y-4">
+              <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h2 class="text-base font-bold text-slate-900">Báo giá Đại lý</h2>
+                <span id="order-count" class="text-xs bg-slate-100 px-2.5 py-1 rounded-md text-slate-600 font-bold">0 Sản phẩm</span>
+              </div>
+
+              <div class="p-3 bg-blue-50 border border-blue-200/80 rounded-xl text-xs text-blue-900 flex items-start gap-2.5 leading-relaxed">
+                <svg class="w-4 h-4 text-blue-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span>Giá bên dưới đã bao gồm <strong>mức chiết khấu dự kiến</strong> theo chương trình khuyến mãi hiện tại. Mức chiết khấu cuối cùng sẽ được Chuyên viên bán hàng xác nhận khi chốt đơn.</span>
+              </div>
+
+              <div id="order-items" class="space-y-3 max-h-[300px] overflow-y-auto pr-1 divide-y divide-slate-100">
+                <div class="text-center text-slate-400 py-6 text-sm">Đang tải giá niêm yết...</div>
+              </div>
+
+              <div class="border-t border-slate-200/80 pt-4 space-y-2.5 text-sm">
+                <div class="flex justify-between text-slate-600">
+                  <span>Tổng tiền niêm yết</span>
+                  <span id="subtotal" class="font-semibold text-slate-800">0đ</span>
+                </div>
+                <div class="flex justify-between items-center text-sm py-1">
+                  <span class="text-slate-600">Chiết khấu dự kiến</span>
+                  <span id="discount-amount" class="font-bold text-emerald-600">0đ</span>
+                </div>
+                <div class="border-t border-slate-200/80 pt-3 flex justify-between items-center">
+                  <div>
+                    <span class="text-base font-black text-slate-900 block">Tổng tạm tính</span>
+                    <span class="text-[10px] text-slate-400 block">(Đã trừ chiết khấu dự kiến)</span>
+                  </div>
+                  <span id="total" class="text-2xl font-black text-[#d82a72]">0đ</span>
+                </div>
+              </div>
+
+              <button type="button" id="submit-btn-desktop" class="hidden lg:flex items-center justify-center gap-2 w-full py-4 rounded-xl bg-[#083a3c] hover:bg-[#062b2d] active:scale-[0.99] disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold uppercase tracking-wide transition shadow-sm cursor-pointer text-sm">
+                <span>GỬI YÊU CẦU BÁO GIÁ</span>
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+              </button>
+            </div>
+          </aside>
+        </div>
+
+        <!-- MOBILE BOTTOM BAR -->
+        <div class="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 py-3 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.1)] z-[999]">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Tổng tạm tính</p>
+              <p id="mobile-total" class="text-lg font-black text-[#d82a72]">0đ</p>
+            </div>
+            <button type="button" id="submit-btn-mobile" class="bg-[#083a3c] hover:bg-[#062b2d] active:scale-95 disabled:bg-slate-300 disabled:cursor-not-allowed text-white px-5 py-3 rounded-xl font-bold transition text-xs uppercase tracking-wider cursor-pointer">
+              Xác nhận & Gửi Báo giá
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </main>
+</BaseLayout>
+
+<style>
+  .input {
+    width: 100%;
+    height: 42px;
+    padding: 0 12px;
+    border: 1px solid #CBD5E1;
+    border-radius: 8px;
+    background: #F8FAFC;
+    font-size: 13px;
+    outline: none;
+    transition: all 0.2s ease;
+  }
+
+  .input:focus {
+    border-color: #083a3c;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(8, 58, 60, 0.12);
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+</style>
+
+<script>
+  document.addEventListener("DOMContentLoaded", async () => {
+    let currentPartner: any = null;
+    let computedCartDetails: any = null;
+
+    const DIRECTUS_URL = (import.meta).env?.PUBLIC_DIRECTUS_URL || "https://cms.lapet.vn";
+    const toggleAddressBtn = document.getElementById("toggle-address-panel");
+    const customAddressPanel = document.getElementById("custom-address-panel");
+    const chevronIcon = document.getElementById("chevron-icon");
+    const addressSelect = document.getElementById("shipping-address-select");
+    const addressRadioOptions = document.querySelectorAll('input[name="address_option"]');
+    const savedAddressGroup = document.getElementById("saved-address-group");
+    const customAddressGroup = document.getElementById("custom-address-group");
+    const customRecipientName = document.getElementById("custom-recipient-name");
+    const customRecipientPhone = document.getElementById("custom-recipient-phone");
+    const customStreetAddress = document.getElementById("custom-street-address");
+    const submitBtnDesktop = document.getElementById("submit-btn-desktop");
+    const submitBtnMobile = document.getElementById("submit-btn-mobile");
+
+    // ============================================================
+    // ESCAPE HTML
+    // ============================================================
+
+    function escapeHTML(str: unknown) {
+      return String(str ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    // ============================================================
+    // ODOO ID
+    // ============================================================
+
+    function getOdooId(item: any) {
+      if (!item || item.odoo_id === undefined || item.odoo_id === null) return null;
+      const parsed = parseInt(item.odoo_id, 10);
+      return isNaN(parsed) || parsed <= 0 ? null : parsed;
+    }
+
+    // ============================================================
+    // ĐỌC GIỎ HÀNG
+    // ============================================================
+
+    function getValidCartItems() {
+      try {
+        const rawCart = JSON.parse(localStorage.getItem("cart") || "[]");
+        if (!Array.isArray(rawCart)) return [];
+
+        return rawCart.filter((item: any) => {
+          const odooId = getOdooId(item);
+          const qty = parseInt(item.quantity || item.qty, 10);
+          return odooId !== null && !isNaN(qty) && qty > 0;
+        });
+      } catch (err) {
+        console.error("Lỗi parse giỏ hàng từ localStorage:", err);
+        return [];
+      }
+    }
+
+    // ============================================================
+    // ADDRESS
+    // ============================================================
+
+    function getSelectedAddressOption() {
+      const selectedRadio = Array.from(addressRadioOptions).find((radio: any) => radio.checked) as HTMLInputElement | undefined;
+      return selectedRadio ? selectedRadio.value : "saved";
+    }
+
+    function renderAddressDisplay(addr: any) {
+      const shippingNameEl = document.getElementById("shipping-name");
+      const shippingStreetEl = document.getElementById("shipping-street");
+
+      if (shippingNameEl) shippingNameEl.textContent = addr?.name || currentPartner?.name || "...";
+      if (shippingStreetEl) shippingStreetEl.textContent = addr?.street || currentPartner?.shipping_address || "...";
+    }
+
+    function triggerSelectAddressChange() {
+      if (!addressSelect) return;
+
+      const selectedId = (addressSelect as HTMLSelectElement).value;
+
+      if (!selectedId) {
+        renderAddressDisplay({ name: currentPartner?.name, street: currentPartner?.shipping_address });
+        return;
+      }
+
+      const deliveryAddresses = Array.isArray(currentPartner?.delivery_addresses) ? currentPartner.delivery_addresses : [];
+      const found = deliveryAddresses.find((address: any) => String(address.id) === String(selectedId));
+
+      if (found) renderAddressDisplay(found);
+    }
+
+    function updateCustomAddressDisplay() {
+      if (getSelectedAddressOption() !== "custom") return;
+
+      const nameVal = (customRecipientName as HTMLInputElement | null)?.value.trim() || "";
+      const phoneVal = (customRecipientPhone as HTMLInputElement | null)?.value.trim() || "";
+      const streetVal = (customStreetAddress as HTMLTextAreaElement | null)?.value.trim() || "";
+
+      const displayName = nameVal ? `${nameVal}${phoneVal ? ` (${phoneVal})` : ""}` : "Chưa nhập tên người nhận";
+      const displayStreet = streetVal || "Chưa nhập địa chỉ chi tiết";
+
+      renderAddressDisplay({ name: displayName, street: displayStreet });
+    }
+
+    // ============================================================
+    // SUBMIT BUTTON STATE
+    // ============================================================
+
+    function setSubmitLoading(isLoading: boolean, label = "ĐANG TẠO BÁO GIÁ...") {
+      if (submitBtnDesktop) {
+        submitBtnDesktop.setAttribute("disabled", String(isLoading));
+        submitBtnDesktop.innerHTML = isLoading
+          ? `<span class="inline-block animate-spin mr-2">⏳</span>${escapeHTML(label)}`
+          : `<span>GỬI YÊU CẦU BÁO GIÁ</span><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>`;
+        (submitBtnDesktop as HTMLButtonElement).disabled = isLoading;
+      }
+
+      if (submitBtnMobile) {
+        (submitBtnMobile as HTMLButtonElement).disabled = isLoading;
+        submitBtnMobile.textContent = isLoading ? label : "XÁC NHẬN & GỬI BÁO GIÁ";
+      }
+    }
+
+    // ============================================================
+    // CLIENT ORDER REF
+    // ============================================================
+
+    const QUOTATION_REF_STORAGE_KEY = "lapet_pending_quotation_ref";
+
+    function createCartFingerprint(cart: any[]) {
+      return cart
+        .map((item: any) => `${getOdooId(item)}:${parseInt(item.quantity || item.qty || 1, 10)}`)
+        .sort()
+        .join("|");
+    }
+
+    function getOrCreateClientOrderRef(cart: any[]) {
+      const fingerprint = createCartFingerprint(cart);
+
+      try {
+        const rawStored = sessionStorage.getItem(QUOTATION_REF_STORAGE_KEY);
+        const stored = rawStored ? JSON.parse(rawStored) : null;
+
+        if (stored?.fingerprint === fingerprint && stored?.ref) return stored.ref;
+
+        const randomPart = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : Math.random().toString(36).slice(2);
+
+        const ref = `WEB-B2B-${Date.now()}-${randomPart}`.slice(0, 80);
+
+        sessionStorage.setItem(QUOTATION_REF_STORAGE_KEY, JSON.stringify({ fingerprint, ref }));
+        return ref;
+      } catch {
+        return `WEB-B2B-${Date.now()}`;
+      }
+    }
+
+    function clearClientOrderRef() {
+      try {
+        sessionStorage.removeItem(QUOTATION_REF_STORAGE_KEY);
+      } catch {}
+    }
+
+    // ============================================================
+    // CUSTOMER PROFILE
+    // ============================================================
+
+    async function fetchCustomerProfile() {
+      try {
+        const res = await fetch("/api/customers/me", {
+          method: "GET",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" }
+        });
+
+        const profile = await res.json();
+
+        if (!res.ok || !profile?.authenticated || !profile?.isDealer || !profile?.partner) {
+          window.location.href = "/auth/login";
+          return false;
+        }
+
+        currentPartner = profile.partner;
+        const dealerCode = currentPartner.ref || currentPartner.id || "...";
+
+        const heroCodeEl = document.getElementById("hero-dealer-code");
+        if (heroCodeEl) heroCodeEl.textContent = String(dealerCode);
+
+        const partnerNameEl = document.getElementById("partner-name");
+        if (partnerNameEl) partnerNameEl.textContent = currentPartner.name || "";
+
+        const partnerCodeEl = document.getElementById("partner-code");
+        if (partnerCodeEl) partnerCodeEl.textContent = String(dealerCode);
+
+        const partnerVatEl = document.getElementById("partner-vat");
+        if (partnerVatEl) partnerVatEl.textContent = currentPartner.vat || "N/A";
+
+        const partnerContactEl = document.getElementById("partner-contact");
+        if (partnerContactEl) {
+          const phone = currentPartner.phone || "";
+          const email = currentPartner.email || "";
+          partnerContactEl.textContent = [phone, email].filter(Boolean).join(" • ") || "N/A";
+        }
+
+        const partnerPricelistEl = document.getElementById("partner-pricelist");
+        if (partnerPricelistEl) partnerPricelistEl.textContent = currentPartner.pricelist || "Bảng giá chuẩn";
+
+        renderAddressDisplay({ name: currentPartner.name, street: currentPartner.shipping_address });
+
+        if (addressSelect) {
+          const deliveryAddresses = Array.isArray(currentPartner.delivery_addresses) ? currentPartner.delivery_addresses : [];
+          addressSelect.innerHTML =
+            `<option value="">-- Mặc định (${escapeHTML(currentPartner.shipping_address || "Địa chỉ chính")}) --</option>` +
+            deliveryAddresses.map((addr: any) => `
+              <option value="${escapeHTML(addr.id)}">
+                ${escapeHTML(addr.name || "Địa chỉ giao hàng")}${addr.street ? ` - ${escapeHTML(addr.street)}` : ""}
+              </option>
+            `).join("");
+        }
+
+        return true;
+      } catch (err) {
+        console.error("Profile Error:", err);
+        window.location.href = "/auth/login";
+        return false;
+      }
+    }
+    // ============================================================
+    // ADDRESS EVENTS
+    // ============================================================
+
+    toggleAddressBtn?.addEventListener("click", () => {
+      const isHidden = customAddressPanel?.classList.contains("hidden");
+      customAddressPanel?.classList.toggle("hidden", !isHidden);
+      chevronIcon?.classList.toggle("rotate-180", isHidden);
+    });
+
+    addressRadioOptions.forEach((radio) => {
+      radio.addEventListener("change", () => {
+        const isCustom = (radio as HTMLInputElement).value === "custom";
+        savedAddressGroup?.classList.toggle("hidden", isCustom);
+        customAddressGroup?.classList.toggle("hidden", !isCustom);
+
+        if (isCustom) updateCustomAddressDisplay();
+        else triggerSelectAddressChange();
+      });
+    });
+
+    addressSelect?.addEventListener("change", triggerSelectAddressChange);
+    customRecipientName?.addEventListener("input", updateCustomAddressDisplay);
+    customRecipientPhone?.addEventListener("input", updateCustomAddressDisplay);
+    customStreetAddress?.addEventListener("input", updateCustomAddressDisplay);
+
+    // ============================================================
+    // CALCULATE CART PRICES
+    // ============================================================
+
+    async function calculateCartPrices() {
+      const itemsEl = document.getElementById("order-items");
+      const validCart = getValidCartItems();
+
+      if (validCart.length === 0) {
+        if (itemsEl) {
+          itemsEl.innerHTML = `<div class="text-center text-slate-400 py-6 text-sm">Giỏ hàng trống hoặc dữ liệu sản phẩm không hợp lệ.</div>`;
+        }
+        setSubmitLoading(true, "GIỎ HÀNG TRỐNG");
+        return;
+      }
+
+      setSubmitLoading(true, "ĐANG ĐỒNG BỘ GIÁ...");
+      const itemsPayload = validCart.map((item: any) => ({
+        id: getOdooId(item),
+        sku: item.sku,
+        qty: parseInt(item.quantity || item.qty, 10)
+      }));
+
+      try {
+        const res = await fetch("/api/products/calculate-price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: itemsPayload })
+        });
+
+        if (!res.ok) throw new Error(`Lỗi tính giá từ Odoo API (Status: ${res.status})`);
+
+        const odooData = await res.json();
+        const odooItems = Array.isArray(odooData?.items) ? odooData.items : [];
+        const finalItems: any[] = [];
+
+      // --------------------------------------------------------
+      // MAP PRODUCT
+      // --------------------------------------------------------
+
+        for (const localItem of validCart) {
+          const odooId = getOdooId(localItem);
+          const odooItem = odooItems.find((item: any) => Number(item.id) === odooId);
+
+          if (!odooItem) {
+            throw new Error(`Sản phẩm "${localItem.name || odooId}" không có giá trên Odoo.`);
+          }
+
+          const qty = parseInt(localItem.quantity || localItem.qty, 10);
+          const originalPrice = Number(odooItem.originalPrice ?? odooItem.original_price ?? odooItem.list_price ?? odooItem.lst_price ?? odooItem.price ?? odooItem.price_unit ?? odooItem.unit_price ?? 0);
+          const finalPrice = Number(odooItem.finalPrice ?? odooItem.final_price ?? odooItem.price_unit ?? odooItem.unit_price ?? originalPrice);
+          const lineSubtotal = Number(odooItem.totalLineAmount ?? odooItem.total_line_amount ?? odooItem.subtotal ?? finalPrice * qty);
+          const discountPercent = Number(odooItem.categoryDiscountPercent ?? odooItem.category_discount_percent ?? odooItem.itemDiscountPercent ?? odooItem.item_discount_percent ?? 0);
+
+          finalItems.push({
+            odoo_id: odooId,
+            name: localItem.name || localItem.title || odooItem.name || "Sản phẩm",
+            image: localItem.image || "",
+            qty,
+            originalPrice,
+            price: finalPrice,
+            discountPercent,
+            subtotal: lineSubtotal
+          });
+        }
+
+      // --------------------------------------------------------
+      // SUBTOTAL, DISCOUNT, TOTAL
+      // --------------------------------------------------------
+
+        const apiSubtotal = Number(
+          odooData?.subtotal ?? finalItems.reduce((sum: number, item: any) => sum + Number(item.originalPrice || 0) * Number(item.qty || 0), 0)
+        );
+        const discountAmount = Math.max(0, Number(odooData?.discount_amount ?? 0));
+        const apiTotal = Math.max(0, apiSubtotal - discountAmount);
+
+        computedCartDetails = { items: finalItems, subtotal: apiSubtotal, discountAmount, total: apiTotal };
+
+        console.log("[Checkout Pricing]", { subtotal: apiSubtotal, discountAmount, total: apiTotal });
+
+        renderOrderSummary(computedCartDetails);
+        setSubmitLoading(false);
+      } catch (err) {
+        console.error("Lỗi tính giá Odoo:", err);
+        const errorMessage = err instanceof Error ? err.message : "Lỗi không xác định";
+
+        if (itemsEl) {
+          itemsEl.innerHTML = `<div class="text-center text-rose-500 py-6 text-sm font-medium">⚠️ Không thể tính giá đơn hàng: ${escapeHTML(errorMessage)}</div>`;
+        }
+        setSubmitLoading(true, "LỖI TÍNH GIÁ");
+      }
+    }
+
+    // ============================================================
+    // RENDER ORDER SUMMARY
+    // ============================================================
+
+    function renderOrderSummary(data: any) {
+      const {
+        items = [],
+        subtotal = 0,
+        discountAmount = 0,
+        total = 0
+      } = data || {};
+
+      // ----------------------------------------------------------
+      // TOTAL QUANTITY
+      // ----------------------------------------------------------
+
+      const totalQuantity = Array.isArray(items)
+        ? items.reduce(
+            (sum: number, item: any) =>
+              sum + Number(item.qty || 1),
+            0
+          )
+        : 0;
+
+      const orderCountEl =
+        document.getElementById("order-count");
+
+      if (orderCountEl) {
+        orderCountEl.textContent =
+          `${totalQuantity} Sản phẩm`;
+      }
+
+      // ----------------------------------------------------------
+      // SUBTOTAL
+      // ----------------------------------------------------------
+
+      const subtotalEl =
+        document.getElementById("subtotal");
+
+      if (subtotalEl) {
+        subtotalEl.textContent =
+          Number(subtotal || 0).toLocaleString("vi-VN") +
+          "đ";
+      }
+
+      // ----------------------------------------------------------
+      // DISCOUNT
+      // ----------------------------------------------------------
+
+      const discountEl =
+        document.getElementById("discount-amount");
+
+      if (discountEl) {
+        discountEl.textContent =
+          Number(discountAmount || 0) > 0
+            ? "-" +
+              Number(discountAmount).toLocaleString("vi-VN") +
+              "đ"
+            : "0đ";
+      }
+
+      // ----------------------------------------------------------
+      // TOTAL
+      // ----------------------------------------------------------
+
+      const totalEl =
+        document.getElementById("total");
+
+      if (totalEl) {
+        totalEl.textContent =
+          Number(total || 0).toLocaleString("vi-VN") +
+          "đ";
+      }
+
+      // ----------------------------------------------------------
+      // MOBILE TOTAL
+      // ----------------------------------------------------------
+
+      const mobileTotalEl =
+        document.getElementById("mobile-total");
+
+      if (mobileTotalEl) {
+        mobileTotalEl.textContent =
+          Number(total || 0).toLocaleString("vi-VN") +
+          "đ";
+      }
+
+      // ----------------------------------------------------------
+      // PRODUCT LIST
+      // ----------------------------------------------------------
+
+      const itemsEl =
+        document.getElementById("order-items");
+
+      if (
+        !itemsEl ||
+        !Array.isArray(items)
+      ) {
+        return;
+      }
+
+      itemsEl.innerHTML = items
+        .map((item: any) => {
+          // ------------------------------------------------------
+          // IMAGE
+          // ------------------------------------------------------
+
+          let imageUrl =
+            "https://placehold.co/80x80";
+
+          if (item.image) {
+            const imgStr =
+              String(item.image);
+
+            imageUrl =
+              imgStr.startsWith("http")
+                ? escapeHTML(imgStr)
+                : `${DIRECTUS_URL}/assets/${escapeHTML(
+                    imgStr
+                  )}`;
+          }
+
+          // ------------------------------------------------------
+          // DATA
+          // ------------------------------------------------------
+
+          const safeName =
+            escapeHTML(item.name);
+
+          const safeQty =
+            Number(item.qty || 1);
+
+          const safeOriginalPrice =
+            Number(
+              item.originalPrice || 0
+            ).toLocaleString("vi-VN");
+
+          const safePrice =
+            Number(
+              item.price || 0
+            ).toLocaleString("vi-VN");
+
+          const safeSubtotal =
+            Number(
+              item.subtotal || 0
+            ).toLocaleString("vi-VN");
+
+          const safeDiscountPercent =
+            Number(
+              item.discountPercent || 0
+            );
+
+          // ------------------------------------------------------
+          // DISCOUNT BADGE
+          // ------------------------------------------------------
+
+          const discountBadge =
+            safeDiscountPercent > 0
+              ? `
+                <span
+                  class="inline-flex items-center px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-700 font-bold text-[10px]"
+                >
+                  -${safeDiscountPercent}%
+                </span>
+              `
+              : "";
+
+          // ------------------------------------------------------
+          // PRICE
+          // ------------------------------------------------------
+
+          const priceHtml =
+            safeDiscountPercent > 0
+              ? `
+                <span
+                  class="text-slate-400 line-through"
+                >
+                  ${safeOriginalPrice}đ
+                </span>
+
+                <span
+                  class="font-bold text-[#d82a72]"
+                >
+                  ${safePrice}đ
+                </span>
+
+                ${discountBadge}
+              `
+              : `
+                <span
+                  class="font-semibold text-slate-700"
+                >
+                  ${safePrice}đ
+                </span>
+              `;
+
+          // ------------------------------------------------------
+          // ITEM
+          // ------------------------------------------------------
+
+          return `
+            <div
+              class="flex items-center gap-3 py-2.5 border-b border-slate-100 last:border-b-0 text-xs"
+            >
+              <img
+                src="${imageUrl}"
+                alt="${safeName}"
+                class="w-12 h-12 rounded-lg bg-slate-50 object-cover shrink-0 border border-slate-100"
+              />
+
+              <div
+                class="flex-1 min-w-0"
+              >
+                <p
+                  class="font-bold text-slate-800 line-clamp-1 leading-snug"
+                >
+                  ${safeName}
+                </p>
+
+                <div
+                  class="flex items-center gap-2 mt-1 flex-wrap"
+                >
+                  <span
+                    class="text-slate-400"
+                  >
+                    SL:
+                    <strong
+                      class="text-slate-900"
+                    >
+                      ${safeQty}
+                    </strong>
+                  </span>
+
+                  <span
+                    class="text-slate-300"
+                  >
+                    •
+                  </span>
+
+                  ${priceHtml}
+                </div>
+              </div>
+
+              <div
+                class="text-right whitespace-nowrap shrink-0"
+              >
+                <div
+                  class="font-bold text-slate-900 text-sm"
+                >
+                  ${safeSubtotal}đ
+                </div>
+              </div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+
+    // ============================================================
+    // SUBMIT QUOTATION
+    // ============================================================
+
+    async function handleQuotationSubmit() {
+      const option = getSelectedAddressOption();
+      const validCart = getValidCartItems();
+
+      if (validCart.length === 0) {
+        alert("Giỏ hàng đang trống hoặc không hợp lệ. Vui lòng chọn lại sản phẩm.");
+        return;
+      }
+
+      const itemsPayload = validCart.map((item: any) => ({
+        id: getOdooId(item),
+        sku: item.sku,
+        qty: parseInt(item.quantity || item.qty, 10)
+      }));
+
+      let payloadAddress: any = {};
+
+      if (option === "custom") {
+        const nameVal = (customRecipientName as HTMLInputElement | null)?.value.trim() || "";
+        const phoneVal = (customRecipientPhone as HTMLInputElement | null)?.value.trim() || "";
+        const streetVal = (customStreetAddress as HTMLTextAreaElement | null)?.value.trim() || "";
+
+        if (!nameVal || !phoneVal || !streetVal) {
+          alert("Vui lòng điền đầy đủ thông tin địa chỉ giao hàng mới!");
+          return;
+        }
+
+        payloadAddress = {
+          is_custom_address: true,
+          custom_address: { name: nameVal, phone: phoneVal, street: streetVal }
+        };
+      } else {
+        const selectedVal = (addressSelect as HTMLSelectElement | null)?.value;
+        payloadAddress = {
+          is_custom_address: false,
+          shipping_address_id: selectedVal ? parseInt(selectedVal, 10) : undefined
+        };
+      }
+
+      const payload = {
+        ...payloadAddress,
+        client_order_ref: getOrCreateClientOrderRef(validCart),
+        items: itemsPayload
+      };
+
+      try {
+        setSubmitLoading(true, "ĐANG GỬI BÁO GIÁ...");
+
+        const res = await fetch("/api/orders/create-quotation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const result = await res.json();
+        const orderId = result.order_id || result.id || result.order_code;
+
+        if (res.ok && (result.success || orderId)) {
+          localStorage.removeItem("cart");
+          clearClientOrderRef();
+          window.dispatchEvent(new Event("cart-updated"));
+          window.location.href = `/hoan-tat?order_id=${orderId}`;
+          return;
+        }
+
+        const errMsg = result.error || result.message || "Lỗi không xác định";
+        alert("Tạo báo giá thất bại: " + errMsg);
+        setSubmitLoading(false);
+      } catch (err) {
+        console.error("Submit Error:", err);
+        const errorMessage = err instanceof Error ? err.message : "Lỗi không xác định";
+        alert("Lỗi kết nối khi gửi báo giá: " + errorMessage);
+        setSubmitLoading(false);
+      }
+    }
+
+    // ============================================================
+    // BUTTON EVENTS & INITIALIZE
+    // ============================================================
+
+    submitBtnDesktop?.addEventListener("click", handleQuotationSubmit);
+    submitBtnMobile?.addEventListener("click", handleQuotationSubmit);
+
+    const profileLoaded = await fetchCustomerProfile();
+    if (profileLoaded) await calculateCartPrices();
+  });
+</script>

@@ -1,0 +1,683 @@
+---
+// src/pages/gio-hang.astro
+
+export const prerender = false;
+
+import BaseLayout from '@/layouts/BaseLayout.astro';
+
+// Lấy trạng thái xác thực từ middleware qua Astro.locals.auth
+const auth = Astro.locals.auth;
+
+const isAuthenticated = auth?.isAuthenticated === true;
+const isDealer = auth?.isDealer === true;
+---
+
+<BaseLayout title="Giỏ hàng - LaPet">
+  <main class="bg-[#f7f8fa] min-h-screen py-6 md:py-12 px-4 font-sans">
+    <div class="max-w-4xl mx-auto space-y-6">
+      
+      <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-black text-slate-800">Giỏ hàng của bạn</h1>
+        <a href="/dat-hang-nhanh" class="text-sm font-semibold text-[#d82a72] hover:underline">
+          ← Tiếp tục chọn sản phẩm
+        </a>
+      </div>
+
+      <!-- Banner Tiến Trình Chiết Khấu Bậc Thang (Chỉ dành cho Đại lý) -->
+      <div id="discount-banner" class="bg-amber-50/80 border border-amber-200/80 rounded-2xl p-4 sm:p-5 mb-6 hidden transition-all">
+        <!-- Tiêu đề & Thông báo gợi ý mua thêm -->
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs sm:text-sm mb-4">
+          <div class="flex items-center gap-2">
+            <span class="text-base sm:text-lg">🎁</span>
+            <span class="font-bold text-amber-900 text-sm sm:text-base" id="discount-banner-title">
+              Chiết khấu nhóm Xương gặm
+            </span>
+          </div>
+
+          <!-- Thông báo động số tiền cần mua thêm -->
+          <div class="font-bold text-slate-800 text-right sm:text-left" id="discount-next-target">
+            Đang tính toán mốc chiết khấu...
+          </div>
+        </div>
+
+        <!-- Thanh Tiến Trình Milestone -->
+        <div class="relative my-6 px-3 sm:px-6">
+          <!-- Đường nền vàng nhạt phía sau -->
+          <div class="absolute top-1/2 left-0 w-full h-2.5 bg-amber-200/60 -translate-y-1/2 rounded-full"></div>
+
+          <!-- Thanh màu hồng chạy phủ trên tiến trình -->
+          <div 
+            id="discount-progress-bar" 
+            class="absolute top-1/2 left-0 h-2.5 bg-[#d82a72] -translate-y-1/2 rounded-full transition-all duration-500" 
+            style="width: 0%"
+          ></div>
+
+          <!-- Container chứa các điểm Milestone -->
+          <div id="milestone-steps-container" class="relative flex justify-between items-center w-full">
+            <!-- Mốc mẫu render bằng JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Khu vực hiển thị giỏ hàng -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
+        <div id="cart-items-container" class="divide-y divide-slate-100 p-4 md:p-6">
+          <div class="py-12 text-center text-slate-400 text-sm">Đang tải giỏ hàng...</div>
+        </div>
+
+        <!-- Phần tổng tiền và nút thanh toán -->
+        <div id="cart-footer" class="bg-slate-50 border-t border-slate-200 p-4 md:p-6 hidden">
+          <div class="space-y-3 mb-4 border-b border-slate-200/80 pb-4">
+            <div class="flex justify-between items-center text-sm text-slate-600">
+              <span>Tổng tiền hàng (Tạm tính):</span>
+              <span id="cart-subtotal-price" class="font-bold text-slate-800">0đ</span>
+            </div>
+
+            <!-- Dòng Chiết khấu bậc thang (Ẩn hoàn toàn với Khách lẻ) -->
+            <div id="discount-row" class="flex justify-between items-center text-sm text-emerald-600 hidden">
+              <span class="font-medium" id="discount-row-label">Chiết khấu bậc thang:</span>
+              <span id="cart-discount-amount" class="font-bold">-0đ</span>
+            </div>
+
+            <div class="flex justify-between items-center pt-2 text-base md:text-lg">
+              <span class="font-bold text-slate-800">Tổng thanh toán dự kiến:</span>
+              <span id="cart-total-price" class="text-2xl font-black text-[#d82a72]">0đ</span>
+            </div>
+          </div>
+
+          <div class="flex flex-col sm:flex-row items-center justify-end gap-3">
+            <button type="button" id="clear-cart-btn" class="w-full sm:w-auto px-5 py-3 rounded-xl border border-slate-300 text-slate-600 font-bold text-sm hover:bg-slate-100 transition cursor-pointer">
+              Xóa tất cả
+            </button>
+            <a href="/thanh-toan" id="checkout-btn" class="w-full sm:w-auto px-8 py-3 rounded-xl bg-[#083a3c] hover:bg-[#062b2d] text-white font-bold text-sm transition shadow-sm cursor-pointer text-center block">
+              Thanh toán
+            </a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</BaseLayout>
+
+<div id="cart-auth-config" data-is-dealer={isDealer ? "true" : "false"} hidden></div>
+
+<script>
+
+// Cấu hình danh sách mốc chiết khấu chuẩn theo chương trình thực tế
+const DISCOUNT_TIERS = [
+  { amount: 3000000, percent: 6 },
+  { amount: 5000000, percent: 5 },
+  { amount: 8000000, percent: 8 },
+  { amount: 12000000, percent: 9 },
+  { amount: 20000000, percent: 11 },
+  { amount: 30000000, percent: 12 },
+  { amount: 40000000, percent: 13 },
+  { amount: 50000000, percent: 14 }
+];
+
+// 1. Render cấu trúc mốc ban đầu
+function initMilestoneStepsUI() {
+  const container = document.getElementById('milestone-steps-container');
+  if (!container) return;
+
+  container.innerHTML = DISCOUNT_TIERS.map((tier, index) => `
+    <div class="flex flex-col items-center group relative" data-tier-index="${index}">
+      <!-- Nốt mốc tròn -->
+      <div class="milestone-circle w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-bold transition-all border-2 z-10 bg-white border-amber-300 text-amber-700">
+        ${tier.percent}%
+      </div>
+
+      <!-- Nhãn hiển thị bên dưới -->
+      <div class="absolute -bottom-8 flex flex-col items-center w-14 sm:w-16 text-center pointer-events-none">
+        <span class="milestone-amount text-[10px] sm:text-[11px] font-bold text-amber-900">
+          ${(tier.amount / 1000000)}Tr
+        </span>
+        <span class="milestone-percent text-[9px] sm:text-[10px] font-bold text-[#d82a72]">
+          -${tier.percent}%
+        </span>
+      </div>
+    </div>
+  `).join('');
+}
+
+// 2. Cập nhật UI theo số tiền thực tế (Chia khoảng đều theo vị trí mốc)
+function updateDiscountMilestoneUI(currentTotalAmount) {
+  const banner = document.getElementById('discount-banner');
+  const targetText = document.getElementById('discount-next-target');
+  const progressBar = document.getElementById('discount-progress-bar');
+  
+  if (!banner) return;
+  banner.classList.remove('hidden');
+
+  const totalSteps = DISCOUNT_TIERS.length;
+  
+  const nextTierIndex = DISCOUNT_TIERS.findIndex(tier => currentTotalAmount < tier.amount);
+  const reachedTiers = DISCOUNT_TIERS.filter(tier => currentTotalAmount >= tier.amount);
+  const currentTier = reachedTiers.length > 0 ? reachedTiers[reachedTiers.length - 1] : null;
+
+  // Cập nhật câu chữ thông báo: Dòng chữ đen/tối màu, Số tiền & % màu Hồng (#d82a72)
+  if (targetText) {
+    if (nextTierIndex !== -1) {
+      const nextTier = DISCOUNT_TIERS[nextTierIndex];
+      const amountNeeded = nextTier.amount - currentTotalAmount;
+      targetText.innerHTML = `<span class="text-slate-800 font-bold">Mua thêm </span><strong class="text-[#d82a72] font-black text-base">${amountNeeded.toLocaleString('vi-VN')}đ</strong><span class="text-slate-800 font-bold"> để đạt chiết khấu </span><strong class="text-[#d82a72] font-black text-base">${nextTier.percent}%</strong>`;
+    } else {
+      targetText.innerHTML = `<span class="text-[#d82a72] font-extrabold">🎉 Đã đạt mức chiết khấu cao nhất (${currentTier?.percent}%)!</span>`;
+    }
+  }
+
+  // Tính toán chính xác vị trí thanh tiến trình %
+  let fillPercent = 0;
+
+  if (reachedTiers.length === 0) {
+    const firstTier = DISCOUNT_TIERS[0];
+    const progressInSegment = currentTotalAmount / firstTier.amount;
+    fillPercent = (progressInSegment * (100 / (totalSteps - 1))) / 2;
+  } else if (reachedTiers.length >= totalSteps) {
+    fillPercent = 100;
+  } else {
+    const lastReachedIndex = reachedTiers.length - 1;
+    const prevAmount = DISCOUNT_TIERS[lastReachedIndex].amount;
+    const nextAmount = DISCOUNT_TIERS[lastReachedIndex + 1].amount;
+
+    const segmentProgress = (currentTotalAmount - prevAmount) / (nextAmount - prevAmount);
+    const stepRatio = 100 / (totalSteps - 1);
+    
+    fillPercent = (lastReachedIndex * stepRatio) + (segmentProgress * stepRatio);
+  }
+
+  if (progressBar) {
+    progressBar.style.width = `${fillPercent}%`;
+  }
+
+  // Cập nhật từng điểm mốc
+  DISCOUNT_TIERS.forEach((tier, index) => {
+    const stepEl = document.querySelector(`[data-tier-index="${index}"]`);
+    if (!stepEl) return;
+
+    const circle = stepEl.querySelector('.milestone-circle');
+    const isReached = currentTotalAmount >= tier.amount;
+
+    if (isReached) {
+      // Đã đạt: Vòng tròn màu hồng #d82a72, chữ trắng, dấu check ✓
+      circle.className = 'milestone-circle w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-bold transition-all border-2 z-10 bg-[#d82a72] border-white text-white shadow-md scale-110';
+      circle.innerHTML = '✓';
+    } else {
+      // Chưa đạt: Vòng tròn trắng viền vàng
+      circle.className = 'milestone-circle w-6 h-6 sm:w-7 sm:h-7 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-bold transition-all border-2 z-10 bg-white border-amber-200 text-amber-700/60';
+      circle.innerHTML = `${tier.percent}%`;
+    }
+  });
+}
+
+interface ServerCartItem {
+  id: number;
+  name: string;
+  sku: string;
+  qty: number;
+  original_price: number;
+  price: number;
+  price_unit: number;
+  discount_percent: number;
+  discount_amount: number;
+  category_discount_percent: number;
+  subtotal: number;
+  total: number;
+}
+
+interface PromotionResponse {
+  items: ServerCartItem[];
+  subtotal: number;
+  discount_amount: number;
+  vat_amount: number;
+  total: number;
+  appliedPromotions: {
+    fixedPricePromos: string[];
+    categoryTierPromos: Array<{
+      promoId: string;
+      categoryId: string;
+      appliedPercent: number;
+    }>;
+  };
+  proposedPromotions: {
+    categoryTierPromos: Array<{
+      promoId: string;
+      categoryId: string;
+      appliedPercent: number;
+    }>;
+  };
+}
+
+function initCartPage() {
+  const authEl = document.getElementById("cart-auth-config");
+  const isDealer = authEl?.dataset.isDealer === "true";
+
+  const container = document.getElementById("cart-items-container");
+  const footer = document.getElementById("cart-footer");
+  const subtotalPriceEl = document.getElementById("cart-subtotal-price");
+  const totalPriceEl = document.getElementById("cart-total-price");
+
+  const discountRow = document.getElementById("discount-row");
+  const discountRowLabel = document.getElementById("discount-row-label");
+  const discountAmountEl = document.getElementById("cart-discount-amount");
+  const clearBtn = document.getElementById("clear-cart-btn");
+  const discountBanner = document.getElementById("discount-banner");
+
+  if (!container) return;
+
+  const getCart = () => {
+    try {
+      return JSON.parse(localStorage.getItem("cart") || "[]");
+    } catch {
+      return [];
+    }
+  };
+
+  const saveCart = (cart: any[]) => {
+    localStorage.setItem("cart", JSON.stringify(cart));
+    window.dispatchEvent(new Event("cart-updated"));
+    renderFullCart();
+  };
+
+  /**
+   * Gửi cart lên SERVER để lấy giá + promotion cho Đại lý.
+   */
+  const calculateServerCart = async (cart: any[]): Promise<PromotionResponse | null> => {
+    if (!isDealer) return null;
+
+    const items = cart.map((item: any) => ({
+      odoo_id: Number(item.odoo_id || item.id),
+      qty: Number(item.quantity || item.qty || 1),
+    }));
+
+    const response = await fetch("/api/products/calculate-price", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      throw new Error(error?.error || "Không thể tính giá giỏ hàng.");
+    }
+
+    return response.json();
+  };
+
+  const renderFullCart = async () => {
+    const cart = getCart();
+
+    if (!container || !footer || !totalPriceEl || !subtotalPriceEl) return;
+
+    if (cart.length === 0) {
+      container.innerHTML = `
+        <div class="py-16 text-center space-y-4">
+          <p class="text-slate-500 font-medium">Giỏ hàng của bạn đang trống.</p>
+          <a
+            href="/dat-hang-nhanh"
+            class="inline-block bg-[#083a3c] text-white px-6 py-2.5 rounded-full font-bold text-sm transition hover:bg-[#062b2d]"
+          >
+            Quay lại đặt hàng nhanh
+          </a>
+        </div>
+      `;
+
+      footer.classList.add("hidden");
+      discountBanner?.classList.add("hidden");
+      return;
+    }
+
+    /* KHÁCH LẺ: Render ngay từ localStorage */
+    if (!isDealer) {
+      renderRetailCart(cart);
+      return;
+    }
+
+    /* ĐẠI LÝ: Gọi Server API */
+    container.innerHTML = `
+      <div class="py-12 text-center text-slate-400 text-sm">
+        Đang kiểm tra giá và khuyến mãi...
+      </div>
+    `;
+
+    try {
+      const result = await calculateServerCart(cart);
+      if (!result) return;
+      renderDealerCart(cart, result);
+    } catch (error: any) {
+      console.error("Lỗi tính giỏ hàng:", error);
+
+      container.innerHTML = `
+        <div class="py-12 text-center space-y-3">
+          <p class="text-red-500 font-semibold">
+            ${error?.message || "Không thể tính giá giỏ hàng."}
+          </p>
+          <button
+            type="button"
+            id="retry-cart-btn"
+            class="px-5 py-2.5 bg-[#083a3c] text-white rounded-xl font-bold text-sm cursor-pointer"
+          >
+            Thử lại
+          </button>
+        </div>
+      `;
+
+      footer.classList.add("hidden");
+      document.getElementById("retry-cart-btn")?.addEventListener("click", renderFullCart);
+    }
+  };
+
+  /**
+   * Render giỏ khách lẻ
+   */
+  const renderRetailCart = (cart: any[]) => {
+    let subtotal = 0;
+
+    container.innerHTML = cart
+      .map((item: any) => {
+        const price = Number(item.retail_price || item.price) || 0;
+        const quantity = Number(item.quantity || item.qty) || 1;
+        const lineTotal = price * quantity;
+
+        subtotal += lineTotal;
+
+        return renderCartItemHTML({
+          id: item.id,
+          name: item.name || "Sản phẩm không tên",
+          image: item.image,
+          quantity,
+          originalPrice: price,
+          finalPrice: price,
+          lineTotal,
+          showDiscount: false,
+        });
+      })
+      .join("");
+
+    footer.classList.remove("hidden");
+    subtotalPriceEl!.textContent = subtotal.toLocaleString("vi-VN") + "đ";
+    totalPriceEl!.textContent = subtotal.toLocaleString("vi-VN") + "đ";
+
+    discountRow?.classList.add("hidden");
+    discountBanner?.classList.add("hidden");
+
+    attachEvents();
+  };
+
+  /**
+   * Render giỏ đại lý dựa trên phản hồi từ Server
+   */
+  const renderDealerCart = (cart: any[], result: PromotionResponse) => {
+    container.innerHTML = result.items
+      .map((serverItem) => {
+        const localItem = cart.find(
+          (item: any) =>
+            String(item.odoo_id) === String(serverItem.id) ||
+            String(item.id) === String(serverItem.id)
+        );
+
+        return renderCartItemHTML({
+          id: localItem?.id || serverItem.id,
+          name: serverItem.name,
+          image: localItem?.image,
+          quantity: serverItem.qty,
+          originalPrice: serverItem.original_price,
+          finalPrice: serverItem.price,
+          lineTotal: serverItem.total,
+          discountPercent: serverItem.discount_percent,
+          showDiscount: serverItem.price < serverItem.original_price,
+        });
+      })
+      .join("");
+
+    footer.classList.remove("hidden");
+    subtotalPriceEl!.textContent = result.subtotal.toLocaleString("vi-VN") + "đ";
+
+    if (result.discount_amount > 0) {
+      discountRow?.classList.remove("hidden");
+      if (discountRowLabel) {
+        discountRowLabel.textContent = "Tổng chiết khấu khuyến mãi:";
+      }
+      if (discountAmountEl) {
+        discountAmountEl.textContent = "-" + result.discount_amount.toLocaleString("vi-VN") + "đ";
+      }
+    } else {
+      discountRow?.classList.add("hidden");
+    }
+
+    totalPriceEl!.textContent = result.total.toLocaleString("vi-VN") + "đ";
+
+    // Lọc tính tổng giá trị gốc của các sản phẩm thực sự được gắn cờ chiết khấu nhóm từ Server
+    const promoCategoryTotal = result.items
+      .filter((item) => {
+        const hasCategoryDiscount = Number(item.category_discount_percent) > 0;
+        const isAppliedByServer = result.appliedPromotions?.categoryTierPromos?.some(
+          (promo) => String(promo.categoryId) === String((item as any).category_id)
+        );
+
+        return hasCategoryDiscount || isAppliedByServer;
+      })
+      .reduce((sum, item) => sum + (item.original_price * item.qty), 0);
+
+    // Truyền tổng tiền đã lọc chuẩn (chỉ gồm E01: 17.745.000đ) vào thanh Milestone
+    updateDiscountMilestoneUI(promoCategoryTotal);
+    attachEvents();
+  };
+
+  /**
+   * HTML Sản phẩm trong giỏ
+   */
+  const renderCartItemHTML = ({
+    id,
+    name,
+    image,
+    quantity,
+    originalPrice,
+    finalPrice,
+    lineTotal,
+    discountPercent = 0,
+    showDiscount,
+  }: {
+    id: number | string;
+    name: string;
+    image?: string;
+    quantity: number;
+    originalPrice: number;
+    finalPrice: number;
+    lineTotal: number;
+    discountPercent?: number;
+    showDiscount: boolean;
+  }) => {
+    const imageUrl = image || "https://placehold.co/200x200/fef3df/083a3c?text=LA+PET";
+
+    let priceHTML = "";
+
+    if (showDiscount && finalPrice < originalPrice) {
+      priceHTML = `
+        <div class="flex flex-wrap items-center gap-1.5 mt-0.5">
+          <span class="text-[#d82a72] font-bold text-sm">
+            ${finalPrice.toLocaleString("vi-VN")}đ
+          </span>
+          <del class="text-xs text-slate-400 font-normal line-through">
+            ${originalPrice.toLocaleString("vi-VN")}đ
+          </del>
+          ${
+            discountPercent > 0
+              ? `<span class="text-[10px] bg-emerald-100 text-emerald-700 font-bold px-1.5 py-0.5 rounded-md">-${discountPercent}%</span>`
+              : ""
+          }
+        </div>
+      `;
+    } else {
+      priceHTML = `
+        <p class="text-[#d82a72] font-bold text-sm mt-0.5">
+          ${finalPrice.toLocaleString("vi-VN")}đ
+        </p>
+      `;
+    }
+
+    return `
+      <div
+        class="flex flex-col sm:flex-row items-center justify-between gap-4 py-4 first:pt-0 last:pb-0"
+        data-id="${id}"
+      >
+        <div class="flex items-center gap-4 w-full sm:w-auto">
+          <img
+            src="${imageUrl}"
+            alt="${name}"
+            class="w-16 h-16 rounded-xl object-contain bg-slate-50 border border-slate-100 p-1 shrink-0"
+            onerror="this.onerror=null; this.src='https://placehold.co/200x200/fef3df/083a3c?text=LA+PET';"
+          />
+          <div class="min-w-0">
+            <h3 class="font-semibold text-slate-800 text-sm md:text-base line-clamp-2">
+              ${name}
+            </h3>
+            ${priceHTML}
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between w-full sm:w-auto gap-4">
+          <div class="flex items-center gap-1.5 bg-slate-100 border border-slate-200 rounded-full px-2 py-1">
+            <button
+              type="button"
+              class="minus w-7 h-7 rounded-full bg-white border border-slate-200 flex items-center justify-center font-bold text-slate-600 cursor-pointer hover:bg-slate-50 select-none"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              class="quantity-input w-10 text-center font-bold text-sm text-slate-800 bg-transparent focus:outline-none p-0"
+              value="${quantity}"
+              min="1"
+            />
+            <button
+              type="button"
+              class="plus w-7 h-7 rounded-full bg-white border border-slate-200 flex items-center justify-center font-bold text-slate-600 cursor-pointer hover:bg-slate-50 select-none"
+            >
+              +
+            </button>
+          </div>
+
+          <span class="font-black text-slate-800 text-sm sm:w-28 text-right">
+            ${lineTotal.toLocaleString("vi-VN")}đ
+          </span>
+
+          <button
+            type="button"
+            class="remove text-red-400 hover:text-red-600 p-2 transition cursor-pointer"
+            title="Xóa sản phẩm"
+          >
+            <svg class="w-5 h-5 fill-current pointer-events-none" viewBox="0 0 24 24">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    `;
+  };
+
+  const attachEvents = () => {
+    container?.querySelectorAll("[data-id]").forEach((row) => {
+      const id = (row as HTMLElement).dataset.id;
+      const minusBtn = row.querySelector(".minus");
+      const plusBtn = row.querySelector(".plus");
+      const removeBtn = row.querySelector(".remove");
+      const quantityInput = row.querySelector(".quantity-input") as HTMLInputElement;
+
+      minusBtn?.addEventListener("click", () => {
+        let cart = getCart();
+        const target = cart.find(
+          (x: any) => String(x.id) === String(id) || String(x.odoo_id) === String(id)
+        );
+        if (target) {
+          const qty = Number(target.quantity || target.qty || 1) - 1;
+          if (qty <= 0) {
+            cart = cart.filter(
+              (x: any) => String(x.id) !== String(id) && String(x.odoo_id) !== String(id)
+            );
+          } else {
+            target.quantity = qty;
+            target.qty = qty;
+          }
+          saveCart(cart);
+        }
+      });
+
+      plusBtn?.addEventListener("click", () => {
+        const cart = getCart();
+        const target = cart.find(
+          (x: any) => String(x.id) === String(id) || String(x.odoo_id) === String(id)
+        );
+        if (target) {
+          const qty = Number(target.quantity || target.qty || 1) + 1;
+          target.quantity = qty;
+          target.qty = qty;
+          saveCart(cart);
+        }
+      });
+
+      quantityInput?.addEventListener("change", () => {
+        let val = parseInt(quantityInput.value, 10);
+        let cart = getCart();
+
+        if (isNaN(val) || val <= 0) val = 1;
+
+        const target = cart.find(
+          (x: any) => String(x.id) === String(id) || String(x.odoo_id) === String(id)
+        );
+        if (target) {
+          target.quantity = val;
+          target.qty = val;
+          saveCart(cart);
+        }
+      });
+
+      quantityInput?.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key === "Enter") quantityInput.blur();
+      });
+
+      removeBtn?.addEventListener("click", () => {
+        let cart = getCart();
+        cart = cart.filter(
+          (x: any) => String(x.id) !== String(id) && String(x.odoo_id) !== String(id)
+        );
+        saveCart(cart);
+      });
+    });
+  };
+
+  clearBtn?.addEventListener("click", () => {
+    if (confirm("Bạn có chắc chắn muốn xóa toàn bộ giỏ hàng?")) {
+      saveCart([]);
+    }
+  });
+
+  initMilestoneStepsUI();
+  renderFullCart();
+}
+
+window.addEventListener("auth-changed", () => {
+  window.location.reload();
+});
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initCartPage, { once: true });
+} else {
+  initCartPage();
+}
+
+document.addEventListener("astro:page-load", initCartPage);
+</script>
+
+<style is:global>
+  input.quantity-input::-webkit-outer-spin-button,
+  input.quantity-input::-webkit-inner-spin-button {
+    -webkit-appearance: none !important;
+    margin: 0 !important;
+  }
+  input.quantity-input {
+    -moz-appearance: textfield !important;
+    appearance: textfield !important;
+  }
+</style>

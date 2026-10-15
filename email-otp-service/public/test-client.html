@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thử Nghiệm Xác Thực OTP Email</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', sans-serif;
+    }
+
+    body {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      color: #0f172a;
+    }
+
+    .card {
+      background: #ffffff;
+      width: 100%;
+      max-width: 440px;
+      border-radius: 20px;
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.1);
+      padding: 36px 32px;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .badge-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      background: #eff6ff;
+      color: #2563eb;
+      margin-bottom: 16px;
+    }
+
+    .badge-status .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #2563eb;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(1.2); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #0f172a;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+    }
+
+    p.subtitle {
+      font-size: 14px;
+      color: #64748b;
+      line-height: 1.5;
+      margin-bottom: 28px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: #334155;
+      margin-bottom: 8px;
+    }
+
+    input[type="email"] {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1.5px solid #e2e8f0;
+      border-radius: 10px;
+      font-size: 15px;
+      color: #0f172a;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input[type="email"]:focus {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    }
+
+    /* OTP Inputs Group */
+    .otp-inputs {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin: 20px 0;
+    }
+
+    .otp-digit {
+      width: 48px;
+      height: 56px;
+      border: 2px solid #e2e8f0;
+      border-radius: 12px;
+      font-size: 24px;
+      font-weight: 700;
+      text-align: center;
+      color: #0f172a;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .otp-digit:focus {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+      transform: translateY(-2px);
+    }
+
+    button.btn {
+      width: 100%;
+      padding: 13px 20px;
+      background: #2563eb;
+      color: #ffffff;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    button.btn:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+
+    button.btn:active:not(:disabled) {
+      transform: scale(0.98);
+    }
+
+    button.btn:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+
+    .alert {
+      padding: 12px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.4;
+      margin-top: 16px;
+      display: none;
+    }
+
+    .alert-success {
+      background: #ecfdf5;
+      color: #065f46;
+      border: 1px solid #a7f3d0;
+    }
+
+    .alert-error {
+      background: #fef2f2;
+      color: #991b1b;
+      border: 1px solid #fecaca;
+    }
+
+    .alert-info {
+      background: #eff6ff;
+      color: #1e40af;
+      border: 1px solid #bfdbfe;
+    }
+
+    .countdown {
+      text-align: center;
+      margin-top: 14px;
+      font-size: 13px;
+      color: #64748b;
+    }
+
+    .countdown span {
+      color: #2563eb;
+      font-weight: 600;
+    }
+
+    .step-section {
+      display: none;
+    }
+
+    .step-section.active {
+      display: block;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .back-btn {
+      background: none;
+      border: none;
+      color: #64748b;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 16px;
+      width: 100%;
+      justify-content: center;
+    }
+
+    .back-btn:hover {
+      color: #0f172a;
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <div class="badge-status">
+      <span class="dot"></span>
+      <span>Dịch vụ Xác thực OTP</span>
+    </div>
+
+    <!-- BƯỚC 1: NHẬP EMAIL -->
+    <div id="step-email" class="step-section active">
+      <h1>Đăng Nhập Khách Hàng</h1>
+      <p class="subtitle">Nhập email của bạn để nhận mã xác nhận 6 số đăng nhập vào hệ thống.</p>
+
+      <form id="form-send-otp" onsubmit="handleSendOtp(event)">
+        <div class="form-group">
+          <label for="input-email">Địa chỉ Email</label>
+          <input 
+            type="email" 
+            id="input-email" 
+            placeholder="vd: khachhang@gmail.com" 
+            required
+            autocomplete="email"
+          >
+        </div>
+
+        <button type="submit" id="btn-send-otp" class="btn">
+          <span>Gửi Mã Xác Nhận</span>
+        </button>
+      </form>
+    </div>
+
+    <!-- BƯỚC 2: NHẬP 6 SỐ OTP -->
+    <div id="step-verify" class="step-section">
+      <h1>Nhập Mã Xác Thực</h1>
+      <p class="subtitle">
+        Mã 6 số đã được gửi tới <strong id="display-email" style="color: #0f172a;"></strong>. Vui lòng nhập mã để tiếp tục:
+      </p>
+
+      <form id="form-verify-otp" onsubmit="handleVerifyOtp(event)">
+        <div class="otp-inputs" id="otp-container">
+          <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" autocomplete="off" autofocus>
+          <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" autocomplete="off">
+          <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" autocomplete="off">
+          <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" autocomplete="off">
+          <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" autocomplete="off">
+          <input type="text" maxlength="1" inputmode="numeric" class="otp-digit" autocomplete="off">
+        </div>
+
+        <button type="submit" id="btn-verify-otp" class="btn">
+          <span>Xác Nhận Đăng Nhập</span>
+        </button>
+
+        <div class="countdown" id="countdown-box">
+          Có thể gửi lại mã sau <span id="timer-count">60</span>s
+        </div>
+
+        <button type="button" class="back-btn" onclick="backToStepEmail()">
+          ← Thay đổi địa chỉ email
+        </button>
+      </form>
+    </div>
+
+    <!-- BƯỚC 3: THÀNH CÔNG -->
+    <div id="step-success" class="step-section" style="text-align: center;">
+      <div style="width: 64px; height: 64px; border-radius: 50%; background: #ecfdf5; color: #10b981; display: inline-flex; align-items: center; justify-content: center; font-size: 32px; margin-bottom: 16px;">
+        ✓
+      </div>
+      <h1>Xác Thực Thành Công!</h1>
+      <p class="subtitle" style="margin-bottom: 24px;">Bạn đã đăng nhập thành công vào hệ thống.</p>
+
+      <button type="button" class="btn" onclick="backToStepEmail()">
+        Thử Nghiệm Lại Lần Nữa
+      </button>
+    </div>
+
+    <!-- Thông báo kết quả -->
+    <div id="alert-box" class="alert"></div>
+  </div>
+
+  <script>
+    const API_URL = window.location.origin; // Tự động nhận URL của server (ví dụ: http://localhost:4000)
+    let currentEmail = '';
+    let cooldownTimer = null;
+
+    const alertBox = document.getElementById('alert-box');
+
+    function showAlert(message, type = 'info') {
+      alertBox.textContent = message;
+      alertBox.className = `alert alert-${type}`;
+      alertBox.style.display = 'block';
+    }
+
+    function hideAlert() {
+      alertBox.style.display = 'none';
+    }
+
+    // 1. Xử lý Gửi mã OTP
+    async function handleSendOtp(e) {
+      e.preventDefault();
+      const emailInput = document.getElementById('input-email');
+      const btn = document.getElementById('btn-send-otp');
+      const email = emailInput.value.trim();
+
+      if (!email) return;
+
+      btn.disabled = true;
+      btn.querySelector('span').textContent = 'Đang gửi mã...';
+      hideAlert();
+
+      try {
+        const res = await fetch(`${API_URL}/api/send-otp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          currentEmail = email;
+          document.getElementById('display-email').textContent = email;
+          
+          showStep('step-verify');
+          startCooldown(data.cooldownSeconds || 60);
+
+          if (data.simulated) {
+            showAlert('ℹ️ Đang chạy chế độ MÔ PHỎNG (Chưa điền SMTP Gmail trong .env). Hãy mở Terminal server để xem mã OTP 6 số!', 'info');
+          } else {
+            showAlert('✅ Mã OTP đã được gửi vào hòm thư email của bạn!', 'success');
+          }
+
+          // Focus vào ô số đầu tiên
+          setTimeout(() => {
+            const firstInput = document.querySelector('.otp-digit');
+            if (firstInput) firstInput.focus();
+          }, 100);
+        } else {
+          showAlert(data.message || 'Không thể gửi mã xác nhận.', 'error');
+        }
+      } catch (err) {
+        showAlert('Không thể kết nối tới máy chủ. Vui lòng kiểm tra lại dịch vụ.', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = 'Gửi Mã Xác Nhận';
+      }
+    }
+
+    // 2. Xử lý Xác nhận mã OTP
+    async function handleVerifyOtp(e) {
+      e.preventDefault();
+      const digits = Array.from(document.querySelectorAll('.otp-digit')).map(i => i.value).join('');
+      const btn = document.getElementById('btn-verify-otp');
+
+      if (digits.length !== 6) {
+        showAlert('Vui lòng nhập đầy đủ 6 chữ số.', 'error');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.querySelector('span').textContent = 'Đang xác thực...';
+      hideAlert();
+
+      try {
+        const res = await fetch(`${API_URL}/api/verify-otp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: currentEmail, otp: digits })
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          showStep('step-success');
+          showAlert('🎉 Xác thực thành công!', 'success');
+          if (cooldownTimer) clearInterval(cooldownTimer);
+        } else {
+          showAlert(data.message || 'Mã xác thực không đúng.', 'error');
+        }
+      } catch (err) {
+        showAlert('Không thể kết nối tới máy chủ.', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.querySelector('span').textContent = 'Xác Nhận Đăng Nhập';
+      }
+    }
+
+    // Chuyển bước UI
+    function showStep(stepId) {
+      document.querySelectorAll('.step-section').forEach(el => el.classList.remove('active'));
+      document.getElementById(stepId).classList.add('active');
+    }
+
+    function backToStepEmail() {
+      showStep('step-email');
+      hideAlert();
+      document.querySelectorAll('.otp-digit').forEach(i => i.value = '');
+    }
+
+    // Bộ đếm ngược 60s
+    function startCooldown(seconds) {
+      let remaining = seconds;
+      const box = document.getElementById('countdown-box');
+      const countSpan = document.getElementById('timer-count');
+      box.style.display = 'block';
+      countSpan.textContent = remaining;
+
+      if (cooldownTimer) clearInterval(cooldownTimer);
+
+      cooldownTimer = setInterval(() => {
+        remaining -= 1;
+        countSpan.textContent = remaining;
+        if (remaining <= 0) {
+          clearInterval(cooldownTimer);
+          box.innerHTML = `<a href="javascript:void(0)" onclick="resendOtp()" style="color: #2563eb; text-decoration: none; font-weight: 600;">Gửi lại mã mới</a>`;
+        }
+      }, 1000);
+    }
+
+    function resendOtp() {
+      document.getElementById('input-email').value = currentEmail;
+      handleSendOtp(new Event('submit'));
+    }
+
+    // Tự động chuyển focus giữa 6 ô OTP và hỗ trợ Paste
+    const otpInputs = document.querySelectorAll('.otp-digit');
+    otpInputs.forEach((input, index) => {
+      input.addEventListener('input', (e) => {
+        const val = e.target.value;
+        if (val.length === 1 && index < otpInputs.length - 1) {
+          otpInputs[index + 1].focus();
+        }
+      });
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Backspace' && !input.value && index > 0) {
+          otpInputs[index - 1].focus();
+        }
+      });
+
+      // Hỗ trợ Paste toàn bộ 6 số vào ô bất kỳ
+      input.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const pasteData = (e.clipboardData || window.clipboardData).getData('text').trim();
+        if (/^\d{6}$/.test(pasteData)) {
+          pasteData.split('').forEach((char, i) => {
+            if (otpInputs[i]) otpInputs[i].value = char;
+          });
+          otpInputs[5].focus();
+        }
+      });
+    });
+  </script>
+</body>
+</html>

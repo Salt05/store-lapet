@@ -1,0 +1,542 @@
+---
+// src/pages/san-pham/index.astro
+
+// 1. Kích hoạt SSR động
+export const prerender = false;
+
+// 2. CHỐNG CACHE TRÌNH DUYỆT: Ép trình duyệt re-fetch HTML thời gian thực để kiểm tra Cookie
+Astro.response.headers.set(
+  'Cache-Control',
+  'no-store, no-cache, must-revalidate, proxy-revalidate'
+);
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const DIRECTUS_URL = import.meta.env.DIRECTUS_URL || (typeof process !== 'undefined' ? process.env.DIRECTUS_URL : '') || 'http://192.168.1.110:8055';
+
+// 3. KIỂM TRA TRẠNG THÁI ĐẠI LÝ (Lấy trực tiếp từ Middleware/Server State)
+const auth = Astro.locals.auth;
+const isDealer = Boolean(auth?.isDealer || auth?.user?.partner_id);
+
+let products: any[] = [];
+let productGroups: { id: string | number; slug: string; name: string }[] = [];
+let fetchError = false;
+
+try {
+  const [resGroups, resProducts] = await Promise.all([
+    fetch(`${DIRECTUS_URL}/items/product_groups?limit=-1&fields=id,name,slug`),
+    fetch(
+      `${DIRECTUS_URL}/items/products?limit=-1&fields=id,odoo_id,sku,name,slug,price,wholesale_price,sold_quantity,images.directus_files_id,product_groups.*,group.*,groups.*,categories.*,category.*`
+    )
+  ]);
+
+  if (resGroups.ok) {
+    const jsonGroups = await resGroups.json();
+    if (Array.isArray(jsonGroups.data)) {
+      productGroups = jsonGroups.data.map((g: any) => ({
+        id: g.id,
+        slug: g.slug || `group-${g.id}`,
+        name: g.name || g.title || `Nhóm ${g.id}`
+      }));
+    }
+  }
+
+  if (resProducts.ok) {
+    const jsonProducts = await resProducts.json();
+    const rawProducts = jsonProducts.data || [];
+
+    const uniqueMap = new Map();
+    rawProducts.forEach((item: any) => {
+      if (item && item.id && !uniqueMap.has(item.id)) {
+        uniqueMap.set(item.id, item);
+      }
+    });
+    products = Array.from(uniqueMap.values());
+  } else {
+    fetchError = true;
+  }
+} catch (error) {
+  console.error("❌ Lỗi tải dữ liệu từ Directus:", error);
+  fetchError = true;
+}
+
+function parseOdooId(val: any): number | null {
+  if (val === null || val === undefined) return null;
+  const parsed = parseInt(String(val), 10);
+  return isNaN(parsed) ? null : parsed;
+}
+
+function isProductInGroup(product: any, group: { id: string | number; slug: string }): boolean {
+  if (!product) return false;
+
+  const possibleFields = [
+    product.product_groups,
+    product.group,
+    product.groups,
+    product.categories,
+    product.category
+  ];
+
+  for (const field of possibleFields) {
+    if (!field) continue;
+
+    if (Array.isArray(field)) {
+      for (const item of field) {
+        if (!item) continue;
+        if (item === group.id || item === group.slug) return true;
+        
+        if (typeof item === 'object') {
+          const target = item.product_groups_id || item.group_id || item.id || item;
+          if (target === group.id || target.slug === group.slug || target.id === group.id) {
+            return true;
+          }
+        }
+      }
+    }
+
+    if (typeof field === 'object' && field !== null) {
+      const target = field.product_groups_id || field.group_id || field;
+      if (
+        target === group.id ||
+        target.id === group.id ||
+        target.slug === group.slug
+      ) {
+        return true;
+      }
+    }
+
+    if (field === group.id || field === group.slug) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function getProductGroupSlugs(product: any): string {
+  const matchedSlugs: string[] = [];
+
+  productGroups.forEach((group) => {
+    if (isProductInGroup(product, group)) {
+      matchedSlugs.push(group.slug);
+    }
+  });
+
+  return matchedSlugs.length > 0 ? matchedSlugs.join(' ') : 'none';
+}
+
+function getProductImage(product: any) {
+  if (!product.images || !Array.isArray(product.images) || product.images.length === 0) {
+    return 'https://placehold.co/400x400/fef3df/083a3c?text=LA+PET';
+  }
+
+  const firstImg = product.images[0];
+  let fileId = null;
+
+  if (typeof firstImg === 'string') {
+    fileId = firstImg;
+  } else if (typeof firstImg?.directus_files_id === 'string') {
+    fileId = firstImg.directus_files_id;
+  } else if (firstImg?.directus_files_id?.id) {
+    fileId = firstImg.directus_files_id.id;
+  } else if (firstImg?.id) {
+    fileId = firstImg.id;
+  }
+
+  if (!fileId) return 'https://placehold.co/400x400/fef3df/083a3c?text=LA+PET';
+  return `${DIRECTUS_URL}/assets/${fileId}`;
+}
+
+function formatPrice(price: number) {
+  if (typeof price !== 'number' || isNaN(price)) return '0đ';
+  return price.toLocaleString('vi-VN') + 'đ';
+}
+
+function formatQuantity(qty: number) {
+  if (typeof qty !== 'number' || isNaN(qty)) return '0';
+  return qty.toLocaleString('vi-VN');
+}
+---
+
+<BaseLayout title="Tất cả sản phẩm - LA PET Store">
+  <main class="bg-[#fcfbf9] min-h-screen py-10 px-4 sm:px-6 lg:px-8 font-sans">
+    <div class="max-w-7xl mx-auto">
+      
+      <h1 class="text-3xl font-extrabold text-slate-800 mb-8">
+        Tất cả sản phẩm
+      </h1>
+
+      <div class="flex flex-col lg:flex-row gap-8 items-start">
+        
+        <!-- SIDEBAR BỘ LỌC TAY TRÁI -->
+        <aside class="w-full lg:w-64 shrink-0 bg-white p-6 rounded-2xl shadow-sm border border-slate-100 space-y-6">
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-bold text-slate-900 text-base">Nhóm sản phẩm</h3>
+              <button 
+                id="reset-filter-btn"
+                class="text-xs font-semibold text-[#23c1c6] hover:underline hidden"
+              >
+                Xóa lọc
+              </button>
+            </div>
+
+            <ul class="space-y-1.5 text-sm font-medium">
+              <li>
+                <button
+                  class="group-filter-btn w-full flex items-center justify-between px-3 py-2 rounded-xl transition-colors bg-[#087b80] text-white font-semibold cursor-pointer"
+                  data-group="all"
+                >
+                  <span>Tất cả</span>
+                  <span class="text-xs opacity-80">({products.length})</span>
+                </button>
+              </li>
+
+              {productGroups.map((group) => {
+                const count = products.filter((p) => isProductInGroup(p, group)).length;
+
+                return (
+                  <li>
+                    <button
+                      class="group-filter-btn w-full flex items-center justify-between px-3 py-2 rounded-xl transition-colors text-slate-600 hover:bg-slate-50 hover:text-[#087b80] cursor-pointer"
+                      data-group={group.slug}
+                    >
+                      <span class="text-left line-clamp-1">{group.name}</span>
+                      <span class="text-xs text-slate-400 ml-2">({count})</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </aside>
+
+        <!-- DANH SÁCH SẢN PHẨM -->
+        <div class="flex-1 w-full">
+          
+          <div class="flex items-center justify-between mb-6">
+            <h2 class="text-base font-bold text-slate-800">
+              Danh sách sản phẩm (<span id="visible-count">{products.length}</span>)
+            </h2>
+            <div class="flex items-center gap-2 text-sm text-slate-600">
+              <span>Sắp xếp theo</span>
+              <select id="sort-select" class="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none cursor-pointer">
+                <option value="default">Mặc định</option>
+                <option value="sold-desc">Bán chạy nhất</option>
+                <option value="price-asc">Giá: Thấp đến Cao</option>
+                <option value="price-desc">Giá: Cao đến Thấp</option>
+              </select>
+            </div>
+          </div>
+
+          {fetchError ? (
+            <div class="bg-red-50 text-red-600 p-6 rounded-2xl text-center text-sm font-medium">
+              Không thể kết nối đến Directus server ({DIRECTUS_URL}).
+            </div>
+          ) : products.length === 0 ? (
+            <div class="bg-white p-12 rounded-2xl text-center border border-slate-100">
+              <p class="text-slate-500 font-medium">Chưa có sản phẩm nào trong hệ thống.</p>
+            </div>
+          ) : (
+            <div>
+              <div id="product-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
+                {products.map((product) => {
+                  const groupSlugs = getProductGroupSlugs(product);
+                  const productImage = getProductImage(product);
+                  const validOdooId = parseOdooId(product.odoo_id);
+                  const soldQuantity = Number(product.sold_quantity) || 0;
+                  
+                  const retailPrice = Number(product.price) || 0;
+                  const wholesalePrice = Number(product.wholesale_price) || 0;
+                  
+                  const hasWholesale = isDealer && wholesalePrice > 0;
+                  const activePrice = hasWholesale ? wholesalePrice : retailPrice;
+
+                  return (
+                    <div 
+                      class="product-card bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 flex flex-col justify-between shadow-xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group relative"
+                      data-groups={groupSlugs}
+                      data-retail-price={retailPrice}
+                      data-wholesale-price={wholesalePrice}
+                      data-effective-price={activePrice}
+                      data-sold={soldQuantity}
+                    >
+                      <div>
+                        <!-- BADGE ĐÃ BÁN (SỐ LƯỢNG NGỌN LỬA DỰA TRÊN SỐ LƯỢNG ĐÃ BÁN) -->
+                        <div class="mb-2 flex items-center">
+                          {
+                            soldQuantity < 5000 ? (
+                              /* Dưới 5.000: 1 ngọn lửa */
+                              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200/60 shadow-2xs">
+                                <svg class="w-3 h-3 fill-amber-500 shrink-0" viewBox="0 0 20 20">
+                                  <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
+                                </svg>
+                                Đã bán {formatQuantity(soldQuantity)}
+                              </span>
+                            ) : soldQuantity <= 20000 ? (
+                              /* Từ 5.000 - 20.000: 2 ngọn lửa */
+                              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-700 border border-orange-200/60 shadow-2xs">
+                                <div class="flex -space-x-1">
+                                  <svg class="w-3 h-3 fill-orange-500 shrink-0" viewBox="0 0 20 20">
+                                    <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
+                                  </svg>
+                                  <svg class="w-3 h-3 fill-orange-500 shrink-0" viewBox="0 0 20 20">
+                                    <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
+                                  </svg>
+                                </div>
+                                Đã bán {formatQuantity(soldQuantity)}
+                              </span>
+                            ) : (
+                              /* Trên 20.000: 3 ngọn lửa */
+                              <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200/60 shadow-2xs">
+                                <div class="flex -space-x-1">
+                                  <svg class="w-3 h-3 fill-rose-500 shrink-0" viewBox="0 0 20 20">
+                                    <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
+                                  </svg>
+                                  <svg class="w-3 h-3 fill-rose-500 shrink-0" viewBox="0 0 20 20">
+                                    <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
+                                  </svg>
+                                  <svg class="w-3 h-3 fill-rose-500 shrink-0" viewBox="0 0 20 20">
+                                    <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
+                                  </svg>
+                                </div>
+                                Đã bán {formatQuantity(soldQuantity)}
+                              </span>
+                            )
+                          }
+                        </div>
+
+                        <!-- BỘ LỌC HÌNH ẢNH SẢN PHẨM -->
+                        <div class="relative aspect-square rounded-xl overflow-hidden bg-[#fef3df]/30 mb-3">
+                          <img 
+                            src={productImage} 
+                            alt={product.name} 
+                            loading="lazy"
+                            class="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
+                            onerror="this.onerror=null; this.src='https://placehold.co/400x400/fef3df/083a3c?text=LA+PET';"
+                          />
+                        </div>
+
+                        <!-- TÊN SẢN PHẨM -->
+                        <a href={`/san-pham/${product.slug}`} class="block">
+                          <h3 class="font-bold text-xs sm:text-sm text-[#083a3c] hover:text-[#23c1c6] transition-colors cursor-pointer line-clamp-2 leading-snug">
+                            {product.name}
+                          </h3>
+                        </a>
+                      </div>
+
+                      <div class="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <div class="product-price-container flex flex-col">
+                          {/* Giá gốc gạch ngang chỉ hiện khi là Đại lý */}
+                          <span class={`product-price-strike text-[11px] text-slate-400 line-through ${hasWholesale ? '' : 'hidden'}`}>
+                            {formatPrice(retailPrice)}
+                          </span>
+                          
+                          {/* Giá hiển thị chính */}
+                          <span class="product-price-label font-black text-sm sm:text-base text-[#d82a72]">
+                            {formatPrice(activePrice)}
+                          </span>
+                        </div>
+                        
+                        <button 
+                          type="button"
+                          class="add-to-cart-btn bg-[#23c1c6] hover:bg-[#083a3c] text-[#083a3c] hover:text-white w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all shadow-xs shrink-0 cursor-pointer" 
+                          title="Thêm vào giỏ hàng"
+                          data-id={product.id}
+                          data-odoo-id={validOdooId !== null ? validOdooId : ''}
+                          data-sku={product.sku || ''}
+                          data-name={product.name || ''}
+                          data-price={activePrice}
+                          data-retail-price={retailPrice}
+                          data-wholesale-price={wholesalePrice}
+                          data-image={productImage || ''}
+                        >
+                          <svg class="w-4 h-4 sm:w-5 sm:h-5 stroke-current fill-none stroke-2 pointer-events-none" viewBox="0 0 24 24">
+                            <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <path d="M16 10a4 4 0 0 1-8 0"></path>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div id="no-results" class="hidden bg-white p-12 rounded-2xl text-center border border-slate-100 mt-4">
+                <p class="text-slate-500 font-medium">Không có sản phẩm nào thuộc nhóm này.</p>
+              </div>
+            </div>
+          )}
+
+        </div>
+
+      </div>
+    </div>
+  </main>
+</BaseLayout>
+
+<script>
+  function initPage() {
+    // ================= XỬ LÝ LỌC NHÓM SẢN PHẨM & SẮP XẾP =================
+    const filterBtns = document.querySelectorAll('.group-filter-btn');
+    const resetBtn = document.getElementById('reset-filter-btn');
+    const cards = Array.from(document.querySelectorAll('.product-card')) as HTMLElement[];
+    const visibleCount = document.getElementById('visible-count');
+    const noResults = document.getElementById('no-results');
+    const sortSelect = document.getElementById('sort-select') as HTMLSelectElement;
+    const grid = document.getElementById('product-grid');
+
+    let currentGroup = 'all';
+
+    function applyFilterAndSort() {
+      if (sortSelect && grid) {
+        const sortValue = sortSelect.value;
+        if (sortValue !== 'default') {
+          const sortedCards = [...cards].sort((a, b) => {
+            const priceA = parseFloat(a.getAttribute('data-effective-price') || '0');
+            const priceB = parseFloat(b.getAttribute('data-effective-price') || '0');
+            const soldA = parseInt(a.getAttribute('data-sold') || '0', 10);
+            const soldB = parseInt(b.getAttribute('data-sold') || '0', 10);
+
+            if (sortValue === 'price-asc') return priceA - priceB;
+            if (sortValue === 'price-desc') return priceB - priceA;
+            if (sortValue === 'sold-desc') return soldB - soldA;
+            return 0;
+          });
+
+          sortedCards.forEach((card) => grid.appendChild(card));
+        }
+      }
+
+      let visibleCards = cards.filter((card) => {
+        const groupsAttr = card.getAttribute('data-groups') || '';
+        const groupsList = groupsAttr.split(' ');
+
+        if (currentGroup === 'all' || groupsList.includes(currentGroup)) {
+          card.classList.remove('hidden');
+          return true;
+        } else {
+          card.classList.add('hidden');
+          return false;
+        }
+      });
+
+      if (visibleCount) visibleCount.textContent = visibleCards.length.toString();
+
+      if (noResults) {
+        if (visibleCards.length === 0) {
+          noResults.classList.remove('hidden');
+        } else {
+          noResults.classList.add('hidden');
+        }
+      }
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const categoryParam = urlParams.get('category');
+    if (categoryParam) {
+      const targetBtn = document.querySelector(`.group-filter-btn[data-group="${categoryParam}"]`) as HTMLButtonElement;
+      if (targetBtn) {
+        currentGroup = categoryParam;
+        filterBtns.forEach((b) => {
+          b.classList.remove('bg-[#087b80]', 'text-white', 'font-semibold');
+          b.classList.add('text-slate-600', 'hover:bg-slate-50');
+        });
+        targetBtn.classList.add('bg-[#087b80]', 'text-white', 'font-semibold');
+        targetBtn.classList.remove('text-slate-600', 'hover:bg-slate-50');
+        if (resetBtn) resetBtn.classList.remove('hidden');
+      }
+    }
+
+    applyFilterAndSort();
+
+    filterBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const selectedGroup = btn.getAttribute('data-group') || 'all';
+        currentGroup = selectedGroup;
+
+        filterBtns.forEach((b) => {
+          b.classList.remove('bg-[#087b80]', 'text-white', 'font-semibold');
+          b.classList.add('text-slate-600', 'hover:bg-slate-50');
+        });
+
+        btn.classList.add('bg-[#087b80]', 'text-white', 'font-semibold');
+        btn.classList.remove('text-slate-600', 'hover:bg-slate-50');
+
+        if (resetBtn) {
+          if (currentGroup !== 'all') {
+            resetBtn.classList.remove('hidden');
+          } else {
+            resetBtn.classList.add('hidden');
+          }
+        }
+
+        const newUrl = currentGroup === 'all' ? window.location.pathname : `${window.location.pathname}?category=${currentGroup}`;
+        window.history.replaceState({}, '', newUrl);
+
+        applyFilterAndSort();
+      });
+    });
+
+    resetBtn?.addEventListener('click', () => {
+      const allBtn = document.querySelector('.group-filter-btn[data-group="all"]') as HTMLButtonElement;
+      allBtn?.click();
+    });
+
+    sortSelect?.addEventListener('change', applyFilterAndSort);
+  }
+
+  // ================= THÊM GIỎ HÀNG (SỬ DỤNG EVENT DELEGATION) =================
+  document.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('.add-to-cart-btn') as HTMLButtonElement;
+    if (!btn) return;
+
+    e.preventDefault();
+
+    const productId = btn.getAttribute('data-id');
+    const rawOdooId = btn.getAttribute('data-odoo-id');
+    const parsedOdooId = rawOdooId && rawOdooId !== '' ? parseInt(rawOdooId, 10) : null;
+
+    const productData = {
+      id: productId,
+      odoo_id: !isNaN(Number(parsedOdooId)) ? parsedOdooId : null,
+      sku: btn.getAttribute('data-sku') || '',
+      name: btn.getAttribute('data-[#name]') || btn.getAttribute('data-name') || '',
+      price: parseFloat(btn.getAttribute('data-price') || '0'),
+      retail_price: parseFloat(btn.getAttribute('data-retail-price') || '0'),
+      wholesale_price: parseFloat(btn.getAttribute('data-wholesale-price') || '0'),
+      image: btn.getAttribute('data-image') || '',
+      quantity: 1
+    };
+
+    try {
+      let cart = JSON.parse(localStorage.getItem('cart') || '[]');
+      let existingItem = cart.find((item: any) => item.id === productId);
+
+      if (existingItem) {
+        existingItem.quantity = (existingItem.quantity || 1) + 1;
+        existingItem.price = productData.price;
+        existingItem.retail_price = productData.retail_price;
+        existingItem.wholesale_price = productData.wholesale_price;
+      } else {
+        cart.push(productData);
+      }
+
+      localStorage.setItem('cart', JSON.stringify(cart));
+      window.dispatchEvent(new Event('cart-updated'));
+      window.dispatchEvent(new CustomEvent('open-cart'));
+    } catch (err) {
+      console.error('❌ Lỗi thêm vào giỏ hàng:', err);
+    }
+  });
+
+  // Tự động khởi chạy trên Astro View Transitions
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initPage, { once: true });
+  } else {
+    initPage();
+  }
+
+  document.addEventListener('astro:page-load', initPage);
+</script>

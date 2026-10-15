@@ -1,0 +1,481 @@
+---
+// src/components/Header.astro
+import { Image } from 'astro:assets';
+import logoBrand from '../assets/images/brand/logo.webp';
+
+// 1. CHUẨN HÓA AUTHENTICATION (Chỉ dùng Astro.locals.auth làm Single Source of Truth)
+const auth = Astro.locals.auth;
+
+const isServerLoggedIn = auth?.isAuthenticated === true;
+const isDealer = auth?.isDealer === true;
+
+const partnerId = auth?.partnerId ?? null;
+const partnerName = auth?.partnerName ?? null;
+const partnerPhone = auth?.partnerPhone ?? null;
+
+const serverDisplayName =
+  partnerName ||
+  partnerPhone ||
+  (partnerId ? `Đại lý ${partnerId}` : '');
+
+// 2. Danh sách Navigation Links
+const navLinks = [
+  { name: 'Sản phẩm', href: '/san-pham', isMega: true },
+  { name: 'Tin tức', href: 'https://lapetvietnam.com/tin-tuc/' },
+  { name: 'Liên hệ', href: '/lien-he' },
+  { name: 'Đặt hàng nhanh', href: '/dat-hang-nhanh' },
+];
+
+const megaMenuItems = [
+  {
+    name: 'Bánh thưởng',
+    href: '/san-pham?category=banh-thuong',
+    image: '/e03.webp',
+    fallbackImg: 'https://placehold.co/200x200/fef3df/083a3c?text=Banh+thuong'
+  },
+  {
+    name: 'Tã cho thú cưng',
+    href: '/san-pham?category=ta-cho-thu-cung',
+    image: '/tlt.webp',
+    fallbackImg: 'https://placehold.co/200x200/fef3df/083a3c?text=Ta+cho+thu+cung'
+  },
+  {
+    name: 'Cát vệ sinh',
+    href: '/san-pham?category=cat-ve-sinh',
+    image: '/zc.webp',
+    fallbackImg: 'https://placehold.co/200x200/fef3df/083a3c?text=Cat+ve+sinh'
+  }
+];
+---
+
+<header 
+  x-data={`{ 
+    isCartOpen: false,
+    isMobileMenuOpen: false,
+    isMobileCategoryOpen: false,
+
+    // Auth State truyền trực tiếp từ Astro SSR
+    isLoggedIn: ${isServerLoggedIn}, 
+    isDealer: ${isDealer},
+    partnerId: ${partnerId !== null ? JSON.stringify(partnerId) : 'null'},
+    userName: ${JSON.stringify(serverDisplayName)},
+
+    searchQuery: '',
+    cartCount: 0,
+    cartItems: [],
+    showToast: false,
+    toastMessage: 'Đã chỉnh sửa giỏ hàng thành công!',
+
+    async init() {
+      // Tải dữ liệu giỏ hàng từ LocalStorage (Giữ nguyên cart state)
+      this.loadCart();
+
+      // Đồng bộ giá theo chính sách Đại lý/Khách hàng nếu có
+      if (typeof window.syncCartPrices === 'function') {
+        await window.syncCartPrices();
+      }
+
+      window.addEventListener('cart-updated', () => {
+        this.loadCart();
+        this.triggerToast();
+      });
+
+      // Lắng nghe auth-changed -> Reload để Astro SSR đọc lại Astro.locals.auth
+      window.addEventListener('auth-changed', () => {
+        window.location.reload();
+      });
+    },
+
+    loadCart() {
+      try {
+        this.cartItems = JSON.parse(localStorage.getItem('cart') || '[]');
+        this.cartCount = this.cartItems.reduce((total, item) => total + (item.quantity || 1), 0);
+      } catch (e) {
+        this.cartItems = [];
+        this.cartCount = 0;
+      }
+    },
+
+    updateQuantity(index, delta) {
+      if (this.cartItems[index]) {
+        this.cartItems[index].quantity = (this.cartItems[index].quantity || 1) + delta;
+        if (this.cartItems[index].quantity <= 0) {
+          this.cartItems.splice(index, 1);
+        }
+        this.saveAndNotify();
+      }
+    },
+
+    removeItem(index) {
+      this.cartItems.splice(index, 1);
+      this.saveAndNotify();
+    },
+
+    saveAndNotify() {
+      localStorage.setItem('cart', JSON.stringify(this.cartItems));
+      window.dispatchEvent(new CustomEvent('cart-updated'));
+    },
+
+    get totalPrice() {
+      return this.cartItems.reduce((sum, item) => sum + (item.price || 0) * (item.quantity || 1), 0);
+    },
+
+    triggerToast() {
+      this.showToast = true;
+      setTimeout(() => { this.showToast = false; }, 3000);
+    },
+
+    async logout() {
+      if (!confirm('Bạn có chắc chắn muốn đăng xuất?')) return;
+
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        // Xóa sạch cookie và dữ liệu auth phía client
+        document.cookie = 'partner_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+        document.cookie = 'partner_name=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+        document.cookie = 'session_id=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_info');
+
+        window.location.href = '/auth/login';
+      } catch (e) {
+        console.error('Logout error:', e);
+        alert('Có lỗi xảy ra khi đăng xuất');
+      }
+    }
+  }`}
+  class="w-full font-['Inter',sans-serif] sticky top-0 z-50 shadow-md transition-all overflow-x-clip"
+>
+  <!-- MAIN HEADER -->
+  <div class="bg-[#087b80] text-white py-2.5 sm:py-3 px-3 sm:px-6 lg:px-8">
+    <div class="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4 lg:gap-8">
+      
+      <!-- CỤM BÊN TRÁI: Hamburger + Logo + Navigation Links Desktop -->
+      <div class="flex items-center gap-2 sm:gap-4 lg:gap-10 shrink-0 min-w-0">
+        <button 
+          @click="isMobileMenuOpen = true"
+          type="button"
+          class="lg:hidden p-1.5 text-white hover:bg-white/10 rounded-xl transition-colors cursor-pointer focus:outline-none shrink-0"
+          title="Mở menu"
+        >
+          <svg class="w-6 h-6 stroke-current fill-none stroke-2" viewBox="0 0 24 24">
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        </button>
+
+        <a href="/" class="shrink-0 flex items-center">
+          <Image 
+            src={logoBrand} 
+            alt="LA PET Store Logo" 
+            width={180} 
+            height={60} 
+            format="webp" 
+            class="h-7 sm:h-9 md:h-12 w-auto object-contain"
+          />
+        </a>
+
+        <!-- NAVIGATION DESKTOP (Chuyển sanglg:flex để tránh tràn màn hình tablet/laptop nhỏ) -->
+        <nav class="hidden lg:flex items-center gap-5 lg:gap-7 text-base lg:text-lg font-bold tracking-tight text-white shrink-0">
+          {navLinks.map((link) => (
+            link.isMega ? (
+              <div class="relative group py-1">
+                <a href={link.href} class="relative py-1 whitespace-nowrap inline-flex items-center gap-1 group transition-colors">
+                  <span>{link.name}</span>
+                  <svg class="w-4 h-4 stroke-current fill-none stroke-2 group-hover:rotate-180 transition-transform duration-300" viewBox="0 0 24 24">
+                    <path d="M6 9l6 6 6-6"></path>
+                  </svg>
+                  <span class="absolute bottom-0 left-0 w-full h-[2px] bg-white scale-x-0 group-hover:scale-x-100 transition-transform duration-300 ease-out origin-left rounded-full"></span>
+                </a>
+
+                <!-- MEGA MENU -->
+                <div class="absolute left-1/2 -translate-x-1/2 top-full pt-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-50">
+                  <div class="bg-[#f9f8f6] text-slate-800 rounded-[2rem] p-6 shadow-2xl border border-slate-100 w-[500px] max-w-[90vw]">
+                    <div class="grid grid-cols-3 gap-3">
+                      {megaMenuItems.map((item) => (
+                        <a href={item.href} class="group/item flex flex-col items-center text-center p-3 rounded-2xl hover:bg-white transition-all duration-300 hover:shadow-md">
+                          <div class="w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center p-2 mb-2">
+                            <img src={item.image} alt={item.name} @error={`$el.src = '${item.fallbackImg}'`} class="max-w-full max-h-full object-contain group-hover/item:scale-110 transition-transform duration-300" />
+                          </div>
+                          <span class="font-bold text-xs sm:text-sm text-[#083a3c] group-hover/item:text-[#23c1c6] transition-colors">{item.name}</span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <a href={link.href} class="relative py-1 whitespace-nowrap group transition-colors">
+                <span>{link.name}</span>
+                <span class="absolute bottom-0 left-0 w-full h-[2px] bg-white scale-x-0 group-hover:scale-x-100 transition-transform duration-300 ease-out origin-left rounded-full"></span>
+              </a>
+            )
+          ))}
+        </nav>
+      </div>
+
+      <!-- CỤM GIỮA: Tìm kiếm -->
+      <div class="flex-1 min-w-0 max-w-xl lg:max-w-2xl mx-1 sm:mx-2">
+        <form action="/san-pham" method="get" class="w-full" @submit="searchQuery = searchQuery.trim()">
+          <div class="relative flex items-center bg-white rounded-full overflow-hidden px-2.5 sm:px-5 py-1.5 sm:py-2.5 shadow-sm border border-transparent focus-within:border-slate-200">
+            <svg class="w-4 h-4 sm:w-5 sm:h-5 text-slate-400 shrink-0 stroke-current fill-none stroke-2 mr-1.5 sm:mr-3" viewBox="0 0 24 24">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" name="q" x-model="searchQuery" placeholder="Tìm kiếm sản phẩm..." class="w-full text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none bg-transparent font-medium min-w-0" />
+            <button type="button" x-show="searchQuery.length > 0" @click="searchQuery = ''" class="text-slate-400 hover:text-slate-600 p-0.5 ml-1 shrink-0 cursor-pointer">
+              <svg class="w-4 h-4 stroke-current fill-none stroke-2" viewBox="0 0 24 24">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- CỤM BÊN PHẢI: Tài khoản + Giỏ hàng -->
+      <div class="flex items-center gap-1.5 sm:gap-4 lg:gap-7 shrink-0 text-white">
+        <div class="relative flex items-center min-w-0" x-data="{ isUserDropdownOpen: false }">
+          
+          <!-- TRẠNG THÁI CHƯA ĐĂNG NHẬP -->
+          <template x-if="!isLoggedIn">
+            <a href="/auth/login" class="relative py-1 whitespace-nowrap inline-flex items-center gap-1 text-xs sm:text-base lg:text-lg font-bold tracking-tight text-white group cursor-pointer">
+              <svg class="w-4 h-4 sm:w-5 sm:h-5 fill-current shrink-0" viewBox="0 0 24 24">
+                <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+              </svg>
+              <span class="hidden xs:inline">Đăng nhập</span>
+            </a>
+          </template>
+
+          <!-- TRẠNG THÁI ĐÃ ĐĂNG NHẬP (Thêm min-w-0 và truncate tránh vỡ mobile) -->
+          <template x-if="isLoggedIn">
+            <div class="relative min-w-0">
+              <button 
+                @click="isUserDropdownOpen = !isUserDropdownOpen" 
+                @click.outside="isUserDropdownOpen = false"
+                class="relative py-1 inline-flex items-center gap-1 sm:gap-2 text-xs sm:text-base lg:text-lg font-bold tracking-tight text-white group cursor-pointer focus:outline-none max-w-[100px] xs:max-w-[140px] sm:max-w-xs"
+              >
+                <span class="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+                <span class="truncate" x-text="userName || 'Tài khoản'"></span>
+                <svg class="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-current fill-none stroke-2 shrink-0 transition-transform duration-300" :class="{ 'rotate-180': isUserDropdownOpen }" viewBox="0 0 24 24">
+                  <path d="M6 9l6 6 6-6"></path>
+                </svg>
+              </button>
+
+              <!-- DROPDOWN THÔNG TIN -->
+              <div 
+                x-show="isUserDropdownOpen"
+                x-transition:enter="transition ease-out duration-150"
+                x-transition:enter-start="opacity-0 scale-95"
+                x-transition:enter-end="opacity-100 scale-100"
+                x-transition:leave="transition ease-in duration-100"
+                x-transition:leave-start="opacity-100 scale-100"
+                x-transition:leave-end="opacity-0 scale-95"
+                class="absolute right-0 mt-3 w-64 bg-white rounded-2xl shadow-xl py-2 text-slate-800 z-50 border border-slate-100 space-y-1"
+                x-cloak
+              >
+                <div class="px-4 py-2 border-b border-slate-100">
+                  <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider" x-text="isDealer ? 'Tài khoản Đại lý' : 'Tài khoản Khách hàng'"></p>
+                  <p class="text-sm font-bold text-[#083a3c] truncate" x-text="userName"></p>
+                </div>
+
+                <!-- MENU DÀNH RIÊNG CHO ĐẠI LÝ -->
+                <template x-if="isDealer">
+                  <div class="space-y-1">
+                    <a href="/hoan-tat" class="flex items-center gap-3 px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition">
+                      📊 <span>Thông tin Đại lý & Lịch sử</span>
+                    </a>
+                    <a href="/dat-hang-nhanh" class="flex items-center gap-3 px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 transition">
+                      ⚡ <span>Đặt hàng nhanh</span>
+                    </a>
+                  </div>
+                </template>
+
+                <div class="border-t border-slate-100 my-1"></div>
+
+                <button @click="logout()" class="w-full text-left flex items-center gap-3 px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 transition cursor-pointer">
+                  🚪 <span>Đăng xuất</span>
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- DRAWER GIỎ HÀNG NÚT BẤM -->
+        <button @click="isCartOpen = true" class="relative p-1 hover:opacity-80 transition-opacity cursor-pointer flex items-center shrink-0" title="Giỏ hàng">
+          <div class="relative">
+            <svg class="w-5 h-5 sm:w-7 sm:h-7 fill-none stroke-current stroke-[2]" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"></path>
+              <path d="M3 6h18"></path>
+              <path d="M16 10a4 4 0 0 1-8 0"></path>
+            </svg>
+            <span x-text="cartCount" class="absolute -top-1 -right-1.5 bg-[#083a3c] text-[#23c1c6] text-[10px] font-black rounded-full h-4 min-w-[16px] px-1 flex items-center justify-center shadow-xs border border-[#087b80]">0</span>
+          </div>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- DRAWER MOBILE MENU (Thay lg:hidden chuẩn bộ xem) -->
+  <div x-show="isMobileMenuOpen" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" @click="isMobileMenuOpen = false" class="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 lg:hidden" x-cloak></div>
+
+  <div x-show="isMobileMenuOpen" x-transition:enter="transition ease-out duration-300 transform" x-transition:enter-start="-translate-x-full" x-transition:enter-end="translate-x-0" x-transition:leave="transition ease-in duration-200 transform" x-transition:leave-start="translate-x-0" x-transition:leave-end="-translate-x-full" class="fixed top-0 left-0 h-full w-[80vw] max-w-xs bg-white text-slate-800 shadow-2xl z-50 flex flex-col justify-between lg:hidden" x-cloak>
+    <div class="flex-1 overflow-y-auto">
+      <div class="p-4 bg-[#087b80] text-white flex items-center justify-between border-b border-teal-700">
+        <Image src={logoBrand} alt="LA PET Logo" width={120} height={40} format="webp" class="h-8 w-auto object-contain brightness-0 invert" />
+        <button @click="isMobileMenuOpen = false" class="p-1 rounded-full text-white/80 hover:text-white hover:bg-white/10 transition-colors">
+          <svg class="w-6 h-6 stroke-current fill-none stroke-2" viewBox="0 0 24 24">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="p-4 bg-slate-50 border-b border-slate-100">
+        <template x-if="!isLoggedIn">
+          <a href="/auth/login" class="flex items-center gap-3 text-slate-800 font-bold text-sm hover:text-[#087b80]">
+            <div class="w-9 h-9 rounded-full bg-[#087b80] text-white flex items-center justify-center">
+              <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                <path d="M12,4A4,4 0 0,1 16,8A4,4 0 0,1 12,12A4,4 0 0,1 8,8A4,4 0 0,1 12,4M12,14C16.42,14 20,15.79 20,18V20H4V18C4,15.79 7.58,14 12,14Z"/>
+              </svg>
+            </div>
+            <span>Đăng nhập</span>
+          </a>
+        </template>
+
+        <template x-if="isLoggedIn">
+          <div class="space-y-2">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-full bg-[#087b80] text-white flex items-center justify-center font-bold text-sm shrink-0">
+                🏢
+              </div>
+              <div class="min-w-0">
+                <p class="font-bold text-sm text-slate-900 truncate" x-text="userName"></p>
+                <p class="text-[10px] font-black text-amber-700 bg-yellow-200 px-1.5 py-0.5 rounded w-fit" x-text="isDealer ? 'ĐẠI LÝ' : 'KHÁCH HÀNG'"></p>
+              </div>
+            </div>
+            
+            <div class="pt-2 grid grid-cols-1 gap-1 text-xs font-bold text-slate-600">
+              <template x-if="isDealer">
+                <div class="space-y-1">
+                  <a href="/hoan-tat" class="py-1.5 px-2 rounded hover:bg-slate-200/60 block text-[#087b80]">📊 Thông tin Đại lý & Lịch sử</a>
+                  <a href="/dat-hang-nhanh" class="py-1.5 px-2 rounded hover:bg-slate-200/60 block text-slate-700">⚡ Đặt hàng nhanh</a>
+                </div>
+              </template>
+              <button @click="logout()" class="py-1.5 px-2 rounded hover:bg-red-50 text-red-600 text-left w-full cursor-pointer">🚪 Đăng xuất</button>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <nav class="p-4 space-y-1 font-bold text-sm text-slate-700">
+        {navLinks.map((link) => (
+          link.isMega ? (
+            <div class="space-y-1">
+              <button @click="isMobileCategoryOpen = !isMobileCategoryOpen" class="w-full flex items-center justify-between py-2.5 px-3 rounded-xl hover:bg-slate-100 text-slate-800 transition-colors">
+                <span>{link.name}</span>
+                <svg :class="isMobileCategoryOpen ? 'rotate-180' : ''" class="w-4 h-4 stroke-current fill-none stroke-2 transition-transform duration-200" viewBox="0 0 24 24">
+                  <path d="M6 9l6 6 6-6"></path>
+                </svg>
+              </button>
+              <div x-show="isMobileCategoryOpen" class="pl-4 space-y-1">
+                {megaMenuItems.map((item) => (
+                  <a href={item.href} class="flex items-center gap-3 py-2 px-3 rounded-lg text-xs font-semibold text-slate-600 hover:text-[#087b80] hover:bg-slate-50 transition-colors">
+                    <img src={item.image} alt={item.name} @error={`$el.src = '${item.fallbackImg}'`} class="w-6 h-6 object-contain" />
+                    <span>{item.name}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <a href={link.href} class="block py-2.5 px-3 rounded-xl hover:bg-slate-100 text-slate-800 transition-colors">{link.name}</a>
+          )
+        ))}
+      </nav>
+    </div>
+
+    <div class="p-4 border-t border-slate-100 bg-slate-50 text-xs text-slate-500 text-center font-medium">© LA PET Vietnam Store</div>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div x-show="showToast" x-transition:enter="transition ease-out duration-300 transform" x-transition:enter-start="translate-y-5 opacity-0 scale-95" x-transition:enter-end="translate-y-0 opacity-100 scale-100" x-transition:leave="transition ease-in duration-200 transform" x-transition:leave-start="translate-y-0 opacity-100 scale-100" x-transition:leave-end="translate-y-5 opacity-0 scale-95" class="fixed bottom-6 right-6 z-[99] bg-[#083a3c] text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-[#23c1c6]/30" x-cloak>
+    <div class="w-7 h-7 rounded-full bg-[#23c1c6] text-[#083a3c] flex items-center justify-center shrink-0 font-bold">
+      <svg class="w-4 h-4 stroke-current fill-none stroke-[3]" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>
+    </div>
+    <div>
+      <p class="text-xs font-bold text-[#23c1c6] uppercase tracking-wider">Thành công</p>
+      <p class="text-sm font-medium text-white" x-text="toastMessage"></p>
+    </div>
+  </div>
+
+  <!-- DRAWER GIỎ HÀNG -->
+  <div x-show="isCartOpen" x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" @click="isCartOpen = false" class="fixed inset-0 bg-black/40 backdrop-blur-xs z-50" x-cloak></div>
+
+  <div x-show="isCartOpen" x-transition:enter="transition ease-out duration-300 transform" x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0" x-transition:leave="transition ease-in duration-200 transform" x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full" class="fixed top-0 right-0 h-full w-full max-w-xl bg-white text-slate-800 shadow-2xl z-50 flex flex-col justify-between" x-cloak>
+    <div class="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+      <h2 class="font-bold text-[#083a3c] text-lg flex items-center gap-2">
+        <span>Giỏ Hàng Của Bạn</span>
+        <span class="bg-[#083a3c] text-[#23c1c6] text-xs px-2.5 py-0.5 rounded-full" x-text="cartCount">0</span>
+      </h2>
+      <button @click="isCartOpen = false" class="p-1.5 text-slate-400 hover:text-slate-800 transition-colors cursor-pointer rounded-full hover:bg-slate-200">
+        <svg class="w-6 h-6 stroke-current fill-none stroke-2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+      </button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto p-5 space-y-4 divide-y divide-slate-100">
+      <template x-if="cartItems.length === 0">
+        <div class="h-full flex flex-col items-center justify-center text-center p-6">
+          <div class="w-20 h-20 bg-slate-100 text-slate-300 rounded-full flex items-center justify-center mb-4">
+            <svg class="w-10 h-10 stroke-current fill-none stroke-2" viewBox="0 0 24 24"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"></path><path d="M3 6h18"></path><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+          </div>
+          <p class="text-sm text-slate-500 font-medium mb-6">Giỏ hàng của bạn đang trống</p>
+          <a href="/san-pham" @click="isCartOpen = false" class="bg-[#23c1c6] text-[#083a3c] font-bold text-xs uppercase tracking-wider px-6 py-3 rounded-full hover:bg-[#1eb0b5] transition-colors shadow-sm">Tiếp tục mua sắm</a>
+        </div>
+      </template>
+
+      <template x-for="(item, index) in cartItems" :key="item.id || index">
+        <div class="pt-4 first:pt-0 flex gap-4 items-center">
+          <img :src="item.image || '/e03.webp'" :alt="item.name" class="w-20 h-20 object-cover rounded-2xl border border-slate-200 shrink-0 bg-slate-50 shadow-xs" />
+          <div class="flex-1 min-w-0">
+            <h4 class="text-sm font-bold text-slate-800 line-clamp-2" x-text="item.name"></h4>
+            <p class="text-sm font-bold text-[#083a3c] mt-1"><span x-text="(item.price || 0).toLocaleString('vi-VN')"></span> đ</p>
+            <div class="flex items-center gap-3 mt-3">
+              <div class="inline-flex items-center border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                <button @click="updateQuantity(index, -1)" class="px-3 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 font-bold text-xs transition-colors">-</button>
+                <span class="px-4 py-1 text-xs font-bold text-slate-800" x-text="item.quantity || 1"></span>
+                <button @click="updateQuantity(index, 1)" class="px-3 py-1 bg-slate-50 hover:bg-slate-100 text-slate-600 font-bold text-xs transition-colors">+</button>
+              </div>
+              <button @click="removeItem(index)" class="text-xs font-bold text-red-500 hover:text-red-700 ml-auto transition-colors px-2 py-1">Xóa</button>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <template x-if="cartItems.length > 0">
+      <div class="p-5 border-t border-slate-200 bg-slate-50 space-y-4">
+        <div class="flex items-center justify-between text-base">
+          <span class="font-medium text-slate-600">Tổng tạm tính:</span>
+          <span class="font-black text-[#083a3c] text-lg"><span x-text="totalPrice.toLocaleString('vi-VN')"></span> đ</span>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <a href="/gio-hang" @click="isCartOpen = false" class="w-full py-3 px-4 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 font-bold text-xs uppercase tracking-wider rounded-xl text-center transition-colors shadow-xs">Xem giỏ hàng</a>
+          <a href="/thanh-toan" @click="isCartOpen = false" class="w-full py-3 px-4 bg-[#083a3c] text-[#23c1c6] hover:bg-[#062c2e] font-bold text-xs uppercase tracking-wider rounded-xl text-center transition-colors shadow-sm">Thanh toán</a>
+        </div>
+      </div>
+    </template>
+  </div>
+</header>
+
+<script>
+  import { syncCartPrices } from '@/utils/cartPriceSync';
+  (window as any).syncCartPrices = syncCartPrices;
+</script>
