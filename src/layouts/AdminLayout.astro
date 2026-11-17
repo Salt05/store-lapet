@@ -1,0 +1,424 @@
+---
+// src/layouts/AdminLayout.astro
+import '@/styles/global.css';
+
+interface Props {
+  title: string;
+  activeNav?: 'dashboard' | 'orders' | 'inventory' | 'customers' | 'registrations' | 'products' | 'configs';
+}
+
+const { title, activeNav = 'dashboard' } = Astro.props;
+const adminAuth = (Astro.locals as any)?.adminAuth;
+const adminName = adminAuth?.adminName || 'Quản trị viên';
+const adminEmail = adminAuth?.adminEmail || 'admin@lapet.vn';
+
+const navItems = [
+  {
+    id: 'dashboard',
+    href: '/admin',
+    icon: `<svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>`,
+    label: 'Dashboard',
+  },
+  {
+    id: 'orders',
+    href: '/admin/don-hang',
+    icon: `<svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
+    label: 'Đơn Hàng',
+  },
+  {
+    id: 'inventory',
+    href: '/admin/kho',
+    icon: `<svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>`,
+    label: 'Kho Hàng',
+  },
+  {
+    id: 'customers',
+    href: '/admin/khach-hang',
+    icon: `<svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+    label: 'Đại Lý',
+  },
+  {
+    id: 'registrations',
+    href: '/admin/dang-ky-dai-ly',
+    icon: `<svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></svg>`,
+    label: 'Duyệt Hồ Sơ B2B',
+  },
+  {
+    id: 'products',
+    href: '/admin/san-pham',
+    icon: `<svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>`,
+    label: 'Sản Phẩm',
+  },
+  {
+    id: 'configs',
+    href: '/admin/cai-dat',
+    icon: `<svg class="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>`,
+    label: 'Cài Đặt',
+  },
+];
+---
+
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title} — Admin LA PET ERP</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.15.12/dist/cdn.min.js"></script>
+    <style is:global>
+      [x-cloak] { display: none !important; }
+      body { font-family: var(--font-sans, 'Inter', system-ui, -apple-system, sans-serif); }
+      svg { max-width: 100%; }
+      aside nav svg { width: 1.25rem !important; height: 1.25rem !important; flex-shrink: 0 !important; }
+    </style>
+  </head>
+
+  <body 
+    class="bg-brand-surface text-brand-text min-h-screen flex flex-col antialiased"
+    x-data="{
+      sidebarOpen: false,
+      sidebarCollapsed: false,
+      init() {
+        try {
+          this.sidebarCollapsed = localStorage.getItem('admin_sidebar_collapsed') === 'true';
+        } catch (e) {
+          this.sidebarCollapsed = false;
+        }
+      },
+      toggleSidebar() {
+        this.sidebarCollapsed = !this.sidebarCollapsed;
+        try {
+          localStorage.setItem('admin_sidebar_collapsed', this.sidebarCollapsed);
+        } catch (e) {}
+      },
+      adminPwdModal: false,
+      adminCurrentPwd: '',
+      adminNewPwd: '',
+      adminConfirmPwd: '',
+      adminPwdSubmitting: false,
+      adminPwdMsg: '',
+      adminPwdErr: false,
+
+      async submitAdminPwd() {
+        this.adminPwdMsg = '';
+        this.adminPwdErr = false;
+        if (!this.adminCurrentPwd) {
+          this.adminPwdMsg = 'Vui lòng nhập mật khẩu hiện tại.';
+          this.adminPwdErr = true;
+          return;
+        }
+        if (this.adminNewPwd.length < 6) {
+          this.adminPwdMsg = 'Mật khẩu mới phải từ 6 ký tự trở lên.';
+          this.adminPwdErr = true;
+          return;
+        }
+        if (this.adminNewPwd !== this.adminConfirmPwd) {
+          this.adminPwdMsg = 'Xác nhận mật khẩu mới không khớp.';
+          this.adminPwdErr = true;
+          return;
+        }
+        this.adminPwdSubmitting = true;
+        try {
+          const res = await fetch('/api/admin/auth/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              currentPassword: this.adminCurrentPwd,
+              newPassword: this.adminNewPwd,
+              confirmPassword: this.adminConfirmPwd,
+            })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            this.adminPwdMsg = '✓ Đổi mật khẩu thành công!';
+            this.adminCurrentPwd = '';
+            this.adminNewPwd = '';
+            this.adminConfirmPwd = '';
+            setTimeout(() => { this.adminPwdModal = false; }, 1800);
+          } else {
+            this.adminPwdMsg = data.error || 'Đổi mật khẩu thất bại.';
+            this.adminPwdErr = true;
+          }
+        } catch {
+          this.adminPwdMsg = 'Lỗi kết nối máy chủ.';
+          this.adminPwdErr = true;
+        } finally {
+          this.adminPwdSubmitting = false;
+        }
+      }
+    }"
+  >
+    <!-- TOP BAR MOBILE -->
+    <header class="lg:hidden bg-[#0F172A] text-white px-4 py-3 flex items-center justify-between sticky top-0 z-30 shadow-md border-b border-slate-800">
+      <div class="flex items-center gap-3">
+        <button 
+          @click="sidebarOpen = !sidebarOpen" 
+          class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white cursor-pointer transition-colors" 
+          aria-label="Mở menu quản trị"
+        >
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+          </svg>
+        </button>
+        <div class="flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-lg bg-[#2563EB] text-white font-black text-xs flex items-center justify-center">LA</div>
+          <span class="font-black text-base tracking-wide text-white">LA PET B2B</span>
+        </div>
+      </div>
+      <a href="/" target="_blank" class="text-xs bg-slate-800 px-2.5 py-1 rounded-full text-slate-200 hover:text-white transition-colors">Storefront</a>
+    </header>
+
+    <div class="flex flex-1">
+      <!-- SIDEBAR DESKTOP & MOBILE OVERLAY (Deep Slate #0F172A ERP Style) -->
+      <aside 
+        :class="[
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+          sidebarCollapsed ? 'lg:w-20' : 'lg:w-64',
+          'w-64'
+        ]"
+        class="fixed lg:sticky top-0 left-0 z-40 h-screen bg-[#0F172A] text-slate-300 flex flex-col transition-all duration-300 ease-in-out border-r border-slate-800 shadow-lg"
+      >
+        <!-- Logo Header -->
+        <div class="px-4 py-5 border-b border-slate-800/80 flex items-center justify-between">
+          <div class="flex items-center gap-3 overflow-hidden">
+            <div class="w-8 h-8 rounded-lg bg-[#2563EB] text-white font-black text-xs flex items-center justify-center shrink-0 shadow-sm">
+              LA
+            </div>
+            <div x-show="!sidebarCollapsed" class="transition-opacity duration-200 truncate">
+              <span class="font-black text-base text-white tracking-tight block leading-tight">LA PET B2B</span>
+            </div>
+          </div>
+          <button @click="sidebarOpen = false" class="lg:hidden text-slate-400 hover:text-white p-1 cursor-pointer">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Navigation Links -->
+        <nav class="flex-1 p-3 space-y-1.5 overflow-y-auto overflow-x-hidden">
+          {navItems.map((item) => {
+            const isActive = activeNav === item.id;
+            return (
+              <a
+                href={item.href}
+                title={item.label}
+                class={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg font-medium text-sm transition-all duration-150 group relative ${
+                  isActive
+                    ? 'bg-[#1E293B] text-white font-semibold shadow-2xs border-l-4 border-[#2563EB]'
+                    : 'text-slate-400 hover:bg-slate-800/60 hover:text-white'
+                }`}
+              >
+                <div class="w-5 h-5 flex items-center justify-center shrink-0" set:html={item.icon} />
+                <span 
+                  x-show="!sidebarCollapsed" 
+                  class="truncate transition-opacity duration-200 whitespace-nowrap"
+                >
+                  {item.label}
+                </span>
+
+                <!-- Tooltip when collapsed -->
+                <div 
+                  x-show="sidebarCollapsed" 
+                  class="absolute left-full ml-3 px-2.5 py-1 bg-slate-900 text-white text-xs font-semibold rounded-md shadow-lg pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 whitespace-nowrap hidden lg:block"
+                >
+                  {item.label}
+                </div>
+              </a>
+            );
+          })}
+        </nav>
+
+        <!-- Sidebar Collapse / Expand Toggle Button -->
+        <div class="p-3 border-t border-slate-800/80 hidden lg:block">
+          <button
+            type="button"
+            @click="toggleSidebar()"
+            class="w-full flex items-center justify-center gap-2 p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors cursor-pointer text-xs font-medium"
+            :title="sidebarCollapsed ? 'Mở rộng sidebar (w-64)' : 'Thu gọn sidebar (w-20)'"
+          >
+            <svg 
+              class="w-4 h-4 transition-transform duration-300"
+              :class="sidebarCollapsed ? 'rotate-180' : ''"
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/>
+            </svg>
+            <span x-show="!sidebarCollapsed" class="truncate">Thu gọn sidebar</span>
+          </button>
+        </div>
+
+        <!-- User Info & Logout (Mockup Bottom Admin Profile) -->
+        <div class="p-3.5 border-t border-slate-800 bg-[#0F172A]">
+          <div class="flex items-center justify-between gap-2.5 overflow-hidden">
+            <div class="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+            </div>
+            <div x-show="!sidebarCollapsed" class="truncate flex-1">
+              <p class="text-xs font-bold text-white truncate leading-tight">{adminName}</p>
+              <p class="text-[11px] text-slate-400 truncate mt-0.5">{adminEmail}</p>
+            </div>
+            <button
+              type="button"
+              @click="adminPwdModal = true; adminPwdMsg = ''; adminPwdErr = false;"
+              title="Đổi mật khẩu Quản trị"
+              class="p-2 rounded-lg bg-slate-800 hover:bg-amber-600 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
+              </svg>
+            </button>
+            <button
+              id="admin-logout-btn"
+              title="Đăng xuất khỏi hệ thống"
+              class="p-2 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white transition-colors cursor-pointer shrink-0"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- BACKDROP MOBILE -->
+      <div 
+        x-show="sidebarOpen" 
+        @click="sidebarOpen = false" 
+        x-cloak 
+        class="fixed inset-0 bg-black/60 z-30 lg:hidden backdrop-blur-xs"
+      ></div>
+
+      <!-- MAIN CONTENT WRAPPER -->
+      <div class="flex-1 flex flex-col min-w-0 overflow-y-auto bg-[#F8FAFC]">
+        <!-- TOP NAV DESKTOP (Matches LA PET B2B ERP Mockup) -->
+        <div class="hidden lg:flex items-center justify-between px-8 py-4 bg-white border-b border-slate-200 sticky top-0 z-20">
+          <div class="flex items-center gap-3">
+            <h1 class="text-xl font-black text-[#0F172A] tracking-tight">{title}</h1>
+          </div>
+        </div>
+
+        <main class="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
+          <slot />
+        </main>
+      </div>
+    </div>
+
+    <!-- MODAL ĐỔI MẬT KHẨU QUẢN TRỊ VIÊN -->
+    <div
+      x-show="adminPwdModal"
+      x-cloak
+      class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+    >
+      <div 
+        @click.outside="adminPwdModal = false" 
+        class="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden"
+      >
+        <div class="p-5 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex justify-between items-center">
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-sm font-bold">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="7.5" cy="15.5" r="5.5"/>
+                <path d="m21 2-9.6 9.6"/>
+                <path d="m15.5 7.5 3 3L22 7l-3-3"/>
+              </svg>
+            </div>
+            <div>
+              <h3 class="text-sm font-bold text-white">Đổi Mật Khẩu Quản Trị</h3>
+              <p class="text-xs text-slate-300 mt-0.5">{adminEmail}</p>
+            </div>
+          </div>
+          <button @click="adminPwdModal = false" class="text-slate-400 hover:text-white text-lg p-1 cursor-pointer">✕</button>
+        </div>
+
+        <form @submit.prevent="submitAdminPwd()" class="p-5 space-y-4">
+          <div 
+            x-show="adminPwdMsg" 
+            x-text="adminPwdMsg" 
+            :class="adminPwdErr ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'"
+            class="p-3 text-xs font-semibold rounded-xl border"
+          ></div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Mật khẩu hiện tại
+            </label>
+            <input
+              type="password"
+              x-model="adminCurrentPwd"
+              required
+              placeholder="••••••••"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Mật khẩu mới (tối thiểu 6 ký tự)
+            </label>
+            <input
+              type="password"
+              x-model="adminNewPwd"
+              required
+              minlength="6"
+              placeholder="••••••••"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Xác nhận mật khẩu mới
+            </label>
+            <input
+              type="password"
+              x-model="adminConfirmPwd"
+              required
+              minlength="6"
+              placeholder="••••••••"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500"
+            />
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              @click="adminPwdModal = false"
+              class="px-4 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
+            >
+              Hủy
+            </button>
+            <button
+              type="submit"
+              :disabled="adminPwdSubmitting"
+              class="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
+            >
+              <span x-text="adminPwdSubmitting ? 'Đang lưu...' : 'Lưu mật khẩu mới'"></span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script is:inline>
+      document.getElementById('admin-logout-btn')?.addEventListener('click', async () => {
+        if (!confirm('Bạn có chắc chắn muốn đăng xuất trang quản trị?')) return;
+        try {
+          await fetch('/api/admin/auth/logout', { method: 'POST' });
+          window.location.href = '/admin/login';
+        } catch {
+          window.location.href = '/admin/login';
+        }
+      });
+    </script>
+  </body>
+</html>

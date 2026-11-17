@@ -36,7 +36,7 @@ export const POST: APIRoute = async ({ request }) => {
 
     if (!partner.email) {
       return new Response(
-        JSON.stringify({ error: 'Tài khoản chưa cập nhật Email trên Odoo. Vui lòng liên hệ Hotline.' }),
+        JSON.stringify({ error: 'Tài khoản chưa cập nhật Email trên hệ thống B2B LA PET. Vui lòng liên hệ Hotline.' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -51,7 +51,6 @@ export const POST: APIRoute = async ({ request }) => {
       baseUrl = baseUrl.replace('http://localhost:', 'http://127.0.0.1:');
     }
     const targetUrl = `${baseUrl}/api/send-otp`;
-
     const targetEmail = partner.email.trim().toLowerCase();
 
     // 4. Gọi sang Microservice gửi OTP tới Email của Partner
@@ -95,7 +94,8 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     // 6. Che mờ Email trước khi phản hồi về Client
-    const maskedEmail = partner.email.replace(
+    const displayEmail = targetEmail;
+    const maskedEmail = displayEmail.replace(
       /(.{2})(.*)(?=@)/,
       (_match: string, gp1: string, gp2: string) => gp1 + '*'.repeat(gp2.length)
     );

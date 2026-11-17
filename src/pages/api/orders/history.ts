@@ -1,20 +1,13 @@
+// src/pages/api/orders/history.ts
 import type { APIRoute } from 'astro';
-import { odooReader } from '@/lib/odoo';
+import { query } from '@/lib/db';
 
-interface OdooOrder {
-  id: number;
-  name?: string;
-  date_order?: string;
-  amount_total?: number;
-  state: string;
-  order_line?: number[];
-}
+export const prerender = false;
 
 export const GET: APIRoute = async ({ locals }) => {
   try {
     const auth = locals.auth;
 
-    // 1. Kiểm tra xác thực Server-side
     if (!auth?.isAuthenticated || !auth?.isDealer || !auth?.partnerId) {
       return new Response(
         JSON.stringify({ error: 'Chưa đăng nhập đại lý' }),
@@ -22,7 +15,6 @@ export const GET: APIRoute = async ({ locals }) => {
       );
     }
 
-    // 2. Validate partnerId
     const partnerId = Number(auth.partnerId);
     if (!Number.isInteger(partnerId) || partnerId <= 0) {
       return new Response(
@@ -31,77 +23,43 @@ export const GET: APIRoute = async ({ locals }) => {
       );
     }
 
-    const ocmsBaseUrl = (process.env.OCMS_BACKEND_URL || 'http://localhost:3080').replace(/\/+$/, '');
+    // Query historical orders for this partner directly from PostgreSQL
+    const res = await query(
+      `SELECT o.id, o.order_code, o.amount_total, o.paid_amount, o.status, 
+              o.payment_method, o.payment_status,
+              COALESCE(o.date_order, o.created_at) as date_order,
+              COUNT(oi.id) as items_count
+       FROM orders o
+       LEFT JOIN order_items oi ON o.id = oi.order_id
+       WHERE o.customer_id = $1
+       GROUP BY o.id
+       ORDER BY COALESCE(o.date_order, o.created_at) DESC
+       LIMIT 50`,
+      [partnerId]
+    );
 
-    // 3. Ưu tiên lấy từ OCMS CRM (by-partner) — mã đơn đã chuẩn hóa thành SO Odoo (S02398)
-    try {
-      const ocmsRes = await fetch(`${ocmsBaseUrl}/api/v1/internal/orders/by-partner/${partnerId}`, {
-        signal: AbortSignal.timeout(4000),
-      });
-      if (ocmsRes.ok) {
-        const ocmsJson = await ocmsRes.json();
-        if (ocmsJson.success && Array.isArray(ocmsJson.data) && ocmsJson.data.length > 0) {
-          // Lọc bỏ các đơn có mã WEB tạm thời chưa được đồng bộ mã SO Odoo
-          const cleanData = ocmsJson.data.filter((o: any) => {
-            const id = String(o.id || '');
-            return !id.startsWith('WEB-B2B-') && !id.startsWith('ORD-');
-          });
-          if (cleanData.length > 0) {
-            return new Response(JSON.stringify(cleanData), {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' }
-            });
-          }
-        }
-      }
-    } catch (ocmsErr: any) {
-      console.warn('[API Orders History] OCMS CRM không phản hồi, thử lấy từ Odoo:', ocmsErr.message);
-    }
+    const orders = res.rows.map((ord: any) => ({
+      id: ord.order_code || String(ord.id),
+      order_code: ord.order_code,
+      raw_id: ord.id,
+      date: ord.date_order ? new Date(ord.date_order).toISOString().split('T')[0] : '',
+      amount_total: Number(ord.amount_total || 0),
+      paid_amount: Number(ord.paid_amount || 0),
+      state: ord.status || 'draft',
+      status: ord.status || 'draft',
+      payment_method: ord.payment_method || 'bank_transfer',
+      payment_status: ord.payment_status || 'unpaid',
+      items_count: Number(ord.items_count || 0),
+    }));
 
-    // 4. Fallback sang Odoo XML-RPC nếu OCMS CRM rỗng hoặc lỗi
-    try {
-      const response = await odooReader.executeKw(
-        'sale.order',
-        'search_read',
-        [[['partner_id', '=', partnerId]]],
-        {
-          fields: ['id', 'name', 'date_order', 'amount_total', 'state', 'order_line'],
-          limit: 50,
-          order: 'date_order desc'
-        }
-      );
-
-      const orders = (response || []) as OdooOrder[];
-
-      if (orders && orders.length > 0) {
-        const result = orders.map((ord: OdooOrder) => ({
-          // Luôn dùng mã SO Odoo (S02398) làm id để hiển thị đúng trên giao diện
-          id: ord.name || String(ord.id),
-          raw_id: ord.id,
-          date: ord.date_order ? ord.date_order.split(' ')[0] : '',
-          amount_total: ord.amount_total || 0,
-          state: ord.state,
-          items_count: ord.order_line ? ord.order_line.length : 0
-        }));
-
-        return new Response(JSON.stringify(result), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-    } catch (odooErr: any) {
-      console.warn('[API Orders History] Odoo không phản hồi:', odooErr.message);
-    }
-
-    return new Response(JSON.stringify([]), {
+    return new Response(JSON.stringify(orders), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json' },
     });
-
   } catch (err: any) {
-    console.error('Odoo API History Error:', err);
+    console.error('[API Orders History Error]:', err);
     return new Response(
-      JSON.stringify({ error: err?.message || 'Lỗi kết nối Odoo' }),
+      JSON.stringify({ error: err?.message || 'Lỗi tra cứu lịch sử đơn hàng' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }

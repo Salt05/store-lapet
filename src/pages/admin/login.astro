@@ -1,0 +1,103 @@
+---
+// src/pages/admin/login.astro
+import '@/styles/global.css';
+export const prerender = false;
+---
+
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Đăng nhập Quản trị — LA PET</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.15.12/dist/cdn.min.js"></script>
+    <style>
+      [x-cloak] { display: none !important; }
+      body { font-family: 'Inter', sans-serif; }
+    </style>
+  </head>
+
+  <body class="bg-[#0F172A] min-h-screen flex items-center justify-center p-4">
+    <div 
+      x-data="{
+        email: '',
+        password: '',
+        loading: false,
+        error: '',
+        async handleLogin() {
+          this.error = '';
+          this.loading = true;
+          try {
+            const res = await fetch('/api/admin/auth/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: this.email, password: this.password })
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+              this.error = data.error || 'Đăng nhập không thành công';
+              this.loading = false;
+              return;
+            }
+            window.location.href = '/admin';
+          } catch (err) {
+            this.error = 'Lỗi kết nối máy chủ';
+            this.loading = false;
+          }
+        }
+      }"
+      class="bg-white rounded-2xl shadow-2xl p-6 sm:p-10 w-full max-w-md border border-slate-800"
+    >
+      <div class="text-center mb-8">
+        <div class="w-12 h-12 bg-[#2563EB] text-white rounded-xl flex items-center justify-center mx-auto mb-3 shadow-md">
+          <span class="text-xl font-black">LA</span>
+        </div>
+        <h1 class="text-2xl font-black text-[#0F172A] tracking-tight">LA PET B2B ERP</h1>
+        <p class="text-xs sm:text-sm text-slate-500 mt-1">Đăng nhập cổng điều hành &amp; quản trị kho vận</p>
+      </div>
+
+      <div x-show="error" x-cloak class="mb-5 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
+        <span x-text="error"></span>
+      </div>
+
+      <form @submit.prevent="handleLogin" class="space-y-5">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Email Quản Trị</label>
+          <input
+            type="email"
+            x-model="email"
+            placeholder="Email tài khoản quản trị"
+            required
+            class="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent text-sm font-medium transition-all"
+          />
+        </div>
+
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Mật Khẩu</label>
+          <input
+            type="password"
+            x-model="password"
+            placeholder="••••••••"
+            required
+            class="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent text-sm font-medium transition-all"
+          />
+        </div>
+
+        <button
+          type="submit"
+          :disabled="loading"
+          class="w-full bg-[#2563EB] hover:bg-blue-700 text-white py-3.5 rounded-lg font-bold text-sm shadow-md transition-all duration-200 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+        >
+          <span x-show="!loading">Đăng Nhập Hệ Thống</span>
+          <span x-show="loading" x-cloak>Đang xác thực...</span>
+        </button>
+      </form>
+
+      <div class="mt-8 pt-6 border-t border-slate-100 text-center">
+        <a href="/" class="text-xs font-semibold text-slate-500 hover:text-[#2563EB] transition-colors">&larr; Quay lại Cửa Hàng B2B</a>
+      </div>
+    </div>
+  </body>
+</html>

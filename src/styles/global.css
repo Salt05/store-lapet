@@ -1,26 +1,133 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
 
-:root {
-  /* Khai báo font chữ Inter mặc định */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+/* 1. TAILWIND CSS V4 DESIGN SYSTEM THEME TOKENS (Modern Precision B2B) */
+@theme {
+  /* Brand Palette: Deep Slate + Warm B2B Orange + Crisp White/Slate */
+  --color-brand-dark: #0F172A;
+  --color-brand-primary: #EA580C;
+  --color-brand-accent: #F97316;
+  --color-brand-accent-hover: #C2410C;
+  --color-brand-surface: #F8FAFC;
+  --color-brand-sand: #F1F5F9;
+  --color-brand-sand-hover: #E2E8F0;
+  --color-brand-border: #E2E8F0;
+  --color-brand-text: #0F172A;
+  --color-brand-muted: #64748B;
+  --color-brand-gold: #F59E0B;
+  --color-brand-amber: #EA580C;
+  --color-brand-amber-soft: #FFF7ED;
 
-  /* Cấu hình bảng màu thương hiệu LA PET */
-  --color-lapet-primary: #23c1c6;
-  --color-lapet-primary-hover: #1eb0b5;
-  --color-lapet-dark: #083a3c;
+  /* Backward Compatibility Tokens */
+  --color-lapet-dark: #0F172A;
+  --color-lapet-primary: #EA580C;
+  --color-lapet-primary-hover: #C2410C;
+  --color-lapet-surface: #F8FAFC;
+  --color-lapet-sand: #F1F5F9;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* Canonical Viewport Breakpoints (Mobile 390px, Tablet 768px, Laptop 1024px, Desktop 1440px) */
+  --breakpoint-mobile: 390px;
+  --breakpoint-sm: 390px;
+  --breakpoint-tablet: 768px;
+  --breakpoint-md: 768px;
+  --breakpoint-laptop: 1024px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-desktop: 1440px;
+  --breakpoint-xl: 1440px;
+
+  /* Border Radii Scale */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 9999px;
+
+  /* Tactile Brand Shadows */
+  --shadow-soft: 0 2px 8px -2px rgba(15, 23, 42, 0.06), 0 1px 3px -1px rgba(15, 23, 42, 0.04);
+  --shadow-card: 0 10px 24px -4px rgba(15, 23, 42, 0.08), 0 4px 10px -2px rgba(15, 23, 42, 0.04);
+  --shadow-modal: 0 20px 40px -8px rgba(15, 23, 42, 0.18);
+  --shadow-drawer: -10px 0 30px rgba(15, 23, 42, 0.16);
 }
 
-/* 🟢 BỔ SUNG: Áp dụng x-cloak để ẩn giỏ hàng & menu trước khi Alpine.js khởi tạo */
+/* 2. ROOT CSS VARIABLES BACKWARD COMPATIBILITY */
+:root {
+  --color-brand-dark: #0F172A;
+  --color-brand-primary: #EA580C;
+  --color-brand-accent: #F97316;
+  --color-brand-accent-hover: #C2410C;
+  --color-brand-surface: #F8FAFC;
+  --color-brand-sand: #F1F5F9;
+  --color-brand-sand-hover: #E2E8F0;
+  --color-brand-border: #E2E8F0;
+  --color-brand-text: #0F172A;
+  --color-brand-muted: #64748B;
+  --color-brand-gold: #F59E0B;
+  --color-brand-amber: #EA580C;
+  --color-brand-amber-soft: #FFF7ED;
+
+  --color-lapet-dark: #0F172A;
+  --color-lapet-primary: #EA580C;
+  --color-lapet-primary-hover: #C2410C;
+  --color-lapet-surface: #F8FAFC;
+  --color-lapet-sand: #F1F5F9;
+
+  --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* 3. ALPINE.JS INITIALIZATION PROTECTION */
 [x-cloak] {
   display: none !important;
 }
 
-/* Áp dụng font chữ và màu cơ bản cho toàn trang */
+/* 4. BASE BODY STYLING */
 body {
   font-family: var(--font-sans);
-  color: var(--color-lapet-dark);
-  background-color: #ffffff;
+  color: var(--color-brand-text);
+  background-color: var(--color-brand-surface);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* 5. WARM ORGANIC SHIMMER SKELETON ANIMATION */
+@keyframes shimmerWarm {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, #F5F1EB 25%, #FAF8F5 50%, #F5F1EB 75%);
+  background-size: 200% 100%;
+  animation: shimmerWarm 2s infinite ease-in-out;
+}
+
+/* 6. HIDE SCROLLBAR UTILITY */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 7. CUSTOM THIN SCROLLBAR */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
 }

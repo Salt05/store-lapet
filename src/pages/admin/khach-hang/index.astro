@@ -1,0 +1,1573 @@
+---
+// src/pages/admin/khach-hang/index.astro
+import AdminLayout from '@/layouts/AdminLayout.astro';
+import { query } from '@/lib/db';
+import { directusAdmin } from '@/lib/directus';
+import { readItems } from '@directus/sdk';
+import { computeDealerTierMetrics } from '@/pages/api/admin/customers/index';
+
+export const prerender = false;
+
+const url = new URL(Astro.request.url);
+const currentSearch = url.searchParams.get('q') || '';
+const currentStatus = url.searchParams.get('status') || 'all';
+
+let initialCustomers: any[] = [];
+let pendingDealersCount = 0;
+let totalDealersCount = 0;
+let totalActiveCount = 0;
+let systemTotalSales = 0;
+let systemTotalBonus = 0;
+let initialTotalPages = 1;
+let loadError = '';
+
+try {
+  let registrations: any[] = [];
+  try {
+    const regRes = await directusAdmin.request(
+      readItems('dealer_registrations' as any, {
+        fields: ['id', 'name', 'store_name', 'phone', 'email', 'business_model', 'city', 'status'],
+        limit: 100,
+        sort: ['-created_at', '-id'],
+      })
+    );
+    registrations = regRes || [];
+    pendingDealersCount = registrations.filter((r: any) => r.status === 'pending').length;
+  } catch (directusErr) {
+    console.warn('[Admin Customers SSR] Directus dealer registrations warning:', directusErr);
+  }
+
+  const regByPhone = new Map<string, any>();
+  const regByEmail = new Map<string, any>();
+  for (const r of registrations) {
+    if (r.phone) regByPhone.set(r.phone.replace(/\s+/g, ''), r);
+    if (r.email) regByEmail.set(r.email.toLowerCase().trim(), r);
+  }
+
+  // 1. Thống kê toàn hệ thống (System KPI metrics trên 3000+ đại lý)
+  const statsRes = await query(`
+    SELECT 
+      COUNT(*) as total_dealers,
+      COUNT(CASE WHEN c.is_active = TRUE THEN 1 END) as active_dealers,
+      COALESCE(SUM(c.cumulative_sales), 0) as total_sales,
+      COALESCE(SUM(CASE WHEN c.cumulative_sales >= 100000000 THEN c.cumulative_sales * 0.03 ELSE 0 END), 0) as total_bonus
+    FROM customers c
+  `);
+  if (statsRes.rows[0]) {
+    totalDealersCount = Number(statsRes.rows[0].total_dealers || 0);
+    totalActiveCount = Number(statsRes.rows[0].active_dealers || 0);
+    systemTotalSales = Number(statsRes.rows[0].total_sales || 0);
+    systemTotalBonus = Number(statsRes.rows[0].total_bonus || 0);
+  }
+
+  // 2. Lấy danh sách đại lý (Ưu tiên theo Doanh số tích lũy giảm dần để làm nổi bật đại lý thực tế)
+  const conditions: string[] = ['1=1'];
+  const params: any[] = [];
+  if (currentStatus === 'active') {
+    conditions.push('c.is_active = TRUE');
+  } else if (currentStatus === 'inactive' || currentStatus === 'blocked') {
+    conditions.push('c.is_active = FALSE');
+  }
+  if (currentSearch) {
+    params.push(`%${currentSearch}%`);
+    const idx = params.length;
+    conditions.push(`(c.name ILIKE $${idx} OR c.phone ILIKE $${idx} OR c.code ILIKE $${idx} OR c.email ILIKE $${idx})`);
+  }
+
+  const whereSql = conditions.join(' AND ');
+  const countFilteredRes = await query(`SELECT COUNT(*) as total FROM customers c WHERE ${whereSql}`, params);
+  const currentTotal = Number(countFilteredRes.rows[0]?.total || 0);
+  initialTotalPages = Math.max(1, Math.ceil(currentTotal / 20));
+
+  const custRes = await query(
+    `SELECT 
+       c.id, c.code, c.name, c.phone, c.email, c.address, c.city,
+       c.tier, c.cumulative_sales, c.is_active,
+       COALESCE(SUM(CASE WHEN o.status IN ('confirmed', 'delivered', 'completed', 'sale', 'done') THEN o.amount_total ELSE 0 END), 0) as order_sales,
+       COUNT(CASE WHEN o.status IN ('confirmed', 'delivered', 'completed', 'sale', 'done') THEN 1 END) as confirmed_orders_count
+     FROM customers c
+     LEFT JOIN orders o ON c.id = o.customer_id
+     WHERE ${whereSql}
+     GROUP BY c.id
+     ORDER BY c.cumulative_sales DESC, c.id DESC
+     LIMIT 20`,
+    params
+  );
+
+  initialCustomers = custRes.rows.map((p: any) => {
+    const phoneClean = (p.phone || '').replace(/\s+/g, '');
+    const emailClean = (p.email || '').toLowerCase().trim();
+    const dealerInfo = (phoneClean && regByPhone.get(phoneClean)) || (emailClean && regByEmail.get(emailClean)) || null;
+    const totalSales = Math.max(Number(p.cumulative_sales || 0), Number(p.order_sales || 0));
+    const tierStats = computeDealerTierMetrics(totalSales);
+
+    return {
+      id: p.id,
+      name: p.name || 'Chưa đặt tên',
+      ref: p.code || `DL-${p.id}`,
+      vat: '—',
+      phone: p.phone || '—',
+      email: p.email || '—',
+      street: [p.address, p.city].filter(Boolean).join(', ') || '—',
+      city: p.city || '',
+      active: p.is_active !== false,
+      is_company: true,
+      confirmedOrdersCount: Number(p.confirmed_orders_count || 0),
+      ...tierStats,
+      dealerRegistration: dealerInfo ? {
+        id: dealerInfo.id,
+        store_name: dealerInfo.store_name || dealerInfo.name || '—',
+        business_model: dealerInfo.business_model || '—',
+        status: dealerInfo.status || 'pending',
+        city: dealerInfo.city || '—',
+      } : null,
+    };
+  });
+} catch (e: any) {
+  loadError = e.message || 'Lỗi kết nối cơ sở dữ liệu';
+}
+---
+
+<AdminLayout title="Danh bạ Đại lý B2B & Doanh số tích lũy" activeNav="customers">
+  <style>
+    @media print {
+      body * {
+        visibility: hidden;
+      }
+      #print-cumulative-report,
+      #print-cumulative-report * {
+        visibility: visible;
+      }
+      #print-cumulative-report {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        display: block !important;
+        padding: 12mm;
+        background: #ffffff;
+        color: #111827;
+      }
+      .no-print {
+        display: none !important;
+      }
+    }
+  </style>
+
+  <div
+    class="space-y-4 sm:space-y-5"
+    x-data={`{
+      search: ${JSON.stringify(currentSearch)},
+      statusFilter: ${JSON.stringify(currentStatus)},
+      tierFilter: 'all',
+      customers: ${JSON.stringify(initialCustomers)},
+      pendingDealersCount: ${pendingDealersCount},
+      totalCount: ${totalDealersCount},
+      totalActiveCount: ${totalActiveCount},
+      systemSales: ${systemTotalSales},
+      systemBonus: ${systemTotalBonus},
+      page: 1,
+      limit: 20,
+      totalPages: ${initialTotalPages},
+      loading: false,
+      selectedCustomer: null,
+      drawerOpen: false,
+      loadingDetail: false,
+      detailError: '',
+      partnerModalOpen: false,
+      savingPartner: false,
+      pwdModalOpen: false,
+      pwdCustomer: null,
+      newCustomerPwd: '',
+      savingCustomerPwd: false,
+      pwdSuccessMsg: '',
+      pwdErrorMsg: '',
+
+      openChangeCustomerPasswordModal(c) {
+        this.pwdCustomer = c;
+        this.newCustomerPwd = '';
+        this.pwdSuccessMsg = '';
+        this.pwdErrorMsg = '';
+        this.pwdModalOpen = true;
+      },
+
+      generateRandomPassword() {
+        const rand = Math.floor(1000 + Math.random() * 9000);
+        this.newCustomerPwd = 'Lapet@' + rand;
+      },
+
+      async saveCustomerPassword() {
+        if (!this.newCustomerPwd || this.newCustomerPwd.trim().length < 6) {
+          this.pwdErrorMsg = 'Mật khẩu phải từ 6 ký tự trở lên';
+          return;
+        }
+        this.savingCustomerPwd = true;
+        this.pwdErrorMsg = '';
+        this.pwdSuccessMsg = '';
+        try {
+          const res = await fetch('/api/admin/customers/' + this.pwdCustomer.id, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: this.newCustomerPwd.trim() }),
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.pwdSuccessMsg = '✓ Đã cập nhật mật khẩu mới thành công!';
+            if (this.pwdCustomer) this.pwdCustomer.has_password = true;
+            if (this.selectedCustomer && this.selectedCustomer.id === this.pwdCustomer.id) {
+              this.selectedCustomer.has_password = true;
+            }
+            const match = this.customers.find(x => x.id === this.pwdCustomer.id);
+            if (match) match.has_password = true;
+            setTimeout(() => { this.pwdModalOpen = false; }, 1800);
+          } else {
+            this.pwdErrorMsg = data.error || 'Không thể lưu mật khẩu';
+          }
+        } catch {
+          this.pwdErrorMsg = 'Lỗi kết nối máy chủ';
+        } finally {
+          this.savingCustomerPwd = false;
+        }
+      },
+      partnerForm: {
+        id: null,
+        name: '',
+        ref: '',
+        vat: '',
+        phone: '',
+        email: '',
+        street: '',
+        city: '',
+        is_company: true,
+        active: true
+      },
+
+      get filteredCustomers() {
+        if (this.tierFilter === 'all') return this.customers;
+        return this.customers.filter(c => c.tierCode === this.tierFilter);
+      },
+
+      get displayTotalSales() {
+        if (this.search || this.statusFilter !== 'all' || this.tierFilter !== 'all') {
+          return this.filteredCustomers.reduce((sum, c) => sum + (Number(c.cumulativeSales) || 0), 0);
+        }
+        return this.systemSales;
+      },
+
+      get displayTotalBonus() {
+        if (this.search || this.statusFilter !== 'all' || this.tierFilter !== 'all') {
+          return this.filteredCustomers.reduce((sum, c) => sum + (Number(c.yearEndBonusAmount) || 0), 0);
+        }
+        return this.systemBonus;
+      },
+
+      get displayTotalCount() {
+        if (this.search || this.statusFilter !== 'all' || this.tierFilter !== 'all') {
+          return this.filteredCustomers.length;
+        }
+        return this.totalCount;
+      },
+
+      get displayActiveCount() {
+        if (this.search || this.statusFilter !== 'all' || this.tierFilter !== 'all') {
+          return this.filteredCustomers.filter(c => c.active).length;
+        }
+        return this.totalActiveCount;
+      },
+
+      async fetchCustomers(resetPage = true) {
+        if (resetPage) this.page = 1;
+        this.loading = true;
+        try {
+          const params = new URLSearchParams();
+          if (this.search) params.set('q', this.search);
+          if (this.statusFilter && this.statusFilter !== 'all') params.set('status', this.statusFilter);
+          params.set('limit', String(this.limit));
+          params.set('page', String(this.page));
+
+          const res = await fetch('/api/admin/customers?' + params.toString());
+          const json = await res.json();
+          if (json.success && Array.isArray(json.data)) {
+            this.customers = json.data;
+            this.totalPages = json.totalPages || 1;
+            if (this.search || this.statusFilter !== 'all') {
+              this.totalCount = json.total || this.customers.length;
+            }
+          }
+        } catch (err) {
+          console.error('Lỗi tải danh sách khách hàng:', err);
+        } finally {
+          this.loading = false;
+        }
+      },
+
+      changePage(newPage) {
+        if (newPage < 1 || newPage > this.totalPages) return;
+        this.page = newPage;
+        this.fetchCustomers(false);
+      },
+
+      openCreateModal() {
+        this.partnerForm = {
+          id: null,
+          name: '',
+          ref: 'DL-' + Math.floor(1000 + Math.random() * 9000),
+          vat: '',
+          phone: '',
+          email: '',
+          street: '',
+          city: 'TP.HCM',
+          is_company: true,
+          active: true
+        };
+        this.partnerModalOpen = true;
+      },
+
+      openEditModal(c) {
+        this.partnerForm = {
+          id: c.id,
+          name: c.name || '',
+          ref: c.ref && c.ref !== '—' ? c.ref : '',
+          vat: c.vat && c.vat !== '—' ? c.vat : '',
+          phone: c.phone && c.phone !== '—' ? c.phone : '',
+          email: c.email && c.email !== '—' ? c.email : '',
+          street: c.street && c.street !== '—' ? c.street : '',
+          city: c.city && c.city !== '—' ? c.city : '',
+          is_company: c.is_company !== false,
+          active: c.active !== false
+        };
+        this.partnerModalOpen = true;
+      },
+
+      async savePartner() {
+        if (!this.partnerForm.name || !this.partnerForm.name.trim()) {
+          alert('Vui lòng nhập tên Đại lý / Cửa hàng');
+          return;
+        }
+        this.savingPartner = true;
+        try {
+          const isEdit = Boolean(this.partnerForm.id);
+          const url = isEdit ? ('/api/admin/customers/' + this.partnerForm.id) : '/api/admin/customers';
+          const method = isEdit ? 'PATCH' : 'POST';
+
+          const res = await fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(this.partnerForm)
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.partnerModalOpen = false;
+            await this.fetchCustomers(false);
+            if (isEdit && this.selectedCustomer && this.selectedCustomer.id === this.partnerForm.id) {
+              await this.openDetail(this.partnerForm.id);
+            }
+          } else {
+            alert('Lỗi: ' + (data.error || 'Không thể lưu đối tác'));
+          }
+        } catch (e) {
+          alert('Lỗi kết nối máy chủ');
+        } finally {
+          this.savingPartner = false;
+        }
+      },
+
+      async togglePartnerActive(c) {
+        const nextActive = !c.active;
+        try {
+          const res = await fetch('/api/admin/customers/' + c.id, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ active: nextActive })
+          });
+          const data = await res.json();
+          if (data.success) {
+            c.active = nextActive;
+            const row = this.customers.find(x => x.id === c.id);
+            if (row) row.active = nextActive;
+          } else {
+            alert('Lỗi: ' + (data.error || 'Không thể đổi trạng thái'));
+          }
+        } catch {
+          alert('Lỗi kết nối máy chủ');
+        }
+      },
+
+      exportCumulativeReportCSV() {
+        const headers = [
+          'Ma Doi Tac (Ref)',
+          'Ten Dai Ly',
+          'So Dien Thoai',
+          'Doanh So Tich Luy Nam (VND)',
+          'Hang Dai Ly Hien Tai',
+          'Chiet Khau Nhom Khong Ga (%)',
+          'Chiet Khau Nhom Quan Ga (%)',
+          'Doanh So Can Dat Them (VND)',
+          'Thuong Doanh So Nam +3% (VND)'
+        ];
+        const rows = this.filteredCustomers.map(c => [
+          c.ref || ('DL-' + c.id),
+          '"' + String(c.name || '').replace(/"/g, '""') + '"',
+          c.phone || '',
+          c.cumulativeSales || 0,
+          '"' + (c.tierName || 'Đại lý Tiêu chuẩn') + '"',
+          (c.discountNonChicken || 5) + '%',
+          (c.discountChicken || 7) + '%',
+          c.nextTierNeeded || 0,
+          c.yearEndBonusEligible ? (c.yearEndBonusAmount || 0) : 0
+        ]);
+        const csvContent = '\\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'Bang_Thong_Ke_Doanh_So_Tich_Luy_Dai_Ly_LAPET.csv';
+        link.click();
+      },
+
+      async openDetail(id) {
+        this.drawerOpen = true;
+        this.loadingDetail = true;
+        this.detailError = '';
+        this.selectedCustomer = null;
+
+        try {
+          const res = await fetch('/api/admin/customers/' + id);
+          const json = await res.json();
+          if (json.success && json.customer) {
+            this.selectedCustomer = json.customer;
+          } else {
+            this.detailError = json.error || 'Không thể lấy thông tin chi tiết';
+          }
+        } catch (err) {
+          this.detailError = 'Lỗi kết nối máy chủ';
+        } finally {
+          this.loadingDetail = false;
+        }
+      },
+
+      closeDrawer() {
+        this.drawerOpen = false;
+      },
+
+      formatCurrency(num) {
+        if (!num && num !== 0) return '0 ₫';
+        return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(num);
+      },
+
+      getTierBadgeClass(tierCode) {
+        switch (tierCode) {
+          case 'diamond':
+            return 'bg-purple-50 text-purple-700 border border-purple-200/80';
+          case 'gold':
+            return 'bg-amber-50 text-amber-700 border border-amber-200/80';
+          case 'silver':
+            return 'bg-sky-50 text-sky-700 border border-sky-200/80';
+          default:
+            return 'bg-slate-100 text-slate-700 border border-slate-200/80';
+        }
+      },
+
+      getStatusBadgeClass(state) {
+        switch (state) {
+          case 'sale':
+            return 'bg-emerald-100 text-emerald-800';
+          case 'done':
+            return 'bg-blue-100 text-blue-800';
+          case 'cancel':
+            return 'bg-rose-100 text-rose-800';
+          case 'draft':
+          default:
+            return 'bg-amber-100 text-amber-800';
+        }
+      },
+
+      getStatusLabel(state) {
+        switch (state) {
+          case 'confirmed':
+          case 'sale':
+            return 'Đơn bán hàng';
+          case 'delivered':
+            return 'Đã giao';
+          case 'completed':
+          case 'done':
+            return 'Đã hoàn tất';
+          case 'cancelled':
+          case 'cancel':
+            return 'Đã hủy';
+          case 'draft':
+          case 'sent':
+          default:
+            return 'Đơn nháp';
+        }
+      }
+    }`}
+  >
+    <!-- 1. TOP ACTION HEADER -->
+    <div class="no-print flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
+      <div>
+        <h1 class="text-lg sm:text-xl font-black text-slate-900 flex items-center gap-2">
+          <svg class="w-6 h-6 text-[#087b80] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          <span>Danh bạ Đại lý B2B & Doanh số tích lũy</span>
+        </h1>
+        <p class="text-xs text-slate-500 mt-1">
+          Hệ thống quản lý đối tác sỉ, theo dõi tích lũy doanh số năm và chính sách chiết khấu bậc thang tự động.
+        </p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-2">
+        <!-- Nút Thêm đại lý -->
+        <button
+          type="button"
+          @click="openCreateModal()"
+          class="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+        >
+          <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          <span>Thêm đại lý</span>
+        </button>
+
+        <!-- Nút Xuất CSV -->
+        <button
+          type="button"
+          @click="exportCumulativeReportCSV()"
+          class="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 transition cursor-pointer"
+        >
+          <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>Xuất CSV</span>
+        </button>
+
+        <!-- Nút Xuất PDF Thống kê -->
+        <button
+          type="button"
+          @click="window.print()"
+          class="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl border border-slate-200 transition cursor-pointer"
+        >
+          <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 6 2 18 2 18 9"/>
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+            <rect width="12" height="8" x="6" y="14"/>
+          </svg>
+          <span>Xuất PDF A4</span>
+        </button>
+
+        <!-- Nút Duyệt hồ sơ mới -->
+        <a
+          href="/admin/dang-ky-dai-ly"
+          class="inline-flex items-center gap-2 px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl shadow-xs transition-all"
+        >
+          <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+            <path d="m9 14 2 2 4-4"/>
+          </svg>
+          <span>Duyệt hồ sơ mới</span>
+          <template x-if="pendingDealersCount > 0">
+            <span
+              class="px-2 py-0.5 bg-rose-600 text-white text-[10px] font-black rounded-full shadow-xs animate-pulse"
+              x-text="pendingDealersCount"
+            ></span>
+          </template>
+        </a>
+      </div>
+    </div>
+
+    <!-- 2. HÀNG THẺ CHỈ SỐ TỔNG QUAN (4 KPI METRICS CARDS TOÀN HỆ THỐNG) -->
+    <div class="no-print grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <!-- KPI 1: Đối tác B2B -->
+      <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-teal-50 border border-teal-100 text-[#087b80] flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect width="16" height="20" x="4" y="2" rx="2" ry="2"/>
+            <path d="M9 22v-4h6v4"/>
+            <path d="M8 6h.01"/><path d="M16 6h.01"/>
+            <path d="M8 10h.01"/><path d="M16 10h.01"/>
+            <path d="M8 14h.01"/><path d="M16 14h.01"/>
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">Đối tác B2B</p>
+          <p class="text-base sm:text-lg font-black text-slate-900 mt-0.5">
+            <span x-text="displayTotalCount.toLocaleString('vi-VN')">0</span>
+            <span class="text-xs font-medium text-slate-400 ml-1" x-text="'· ' + displayActiveCount.toLocaleString('vi-VN') + ' hoạt động'"></span>
+          </p>
+        </div>
+      </div>
+
+      <!-- KPI 2: Doanh số toàn hệ thống -->
+      <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+            <polyline points="17 6 23 6 23 12"/>
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">Doanh số toàn hệ thống</p>
+          <p class="text-base sm:text-lg font-black text-slate-900 mt-0.5 truncate" x-text="formatCurrency(displayTotalSales)"></p>
+        </div>
+      </div>
+
+      <!-- KPI 3: Quỹ thưởng năm (+3%) -->
+      <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-600 flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 12 20 22 4 22 4 12"/>
+            <rect width="20" height="5" x="2" y="7"/>
+            <line x1="12" y1="22" x2="12" y2="7"/>
+            <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>
+            <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">Quỹ thưởng năm (+3%)</p>
+          <p class="text-base sm:text-lg font-black text-emerald-700 mt-0.5 truncate" x-text="formatCurrency(displayTotalBonus)"></p>
+        </div>
+      </div>
+
+      <!-- KPI 4: Hồ sơ chờ tiếp nhận -->
+      <a
+        href="/admin/dang-ky-dai-ly"
+        class="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between gap-3 hover:border-amber-300 hover:bg-amber-50/20 transition group"
+      >
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 text-amber-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
+          </div>
+          <div class="min-w-0">
+            <p class="text-[11px] font-bold text-slate-400 uppercase tracking-wider truncate">Hồ sơ chờ tiếp nhận</p>
+            <p class="text-base sm:text-lg font-black text-amber-950 mt-0.5 flex items-center gap-1.5">
+              <span x-text="pendingDealersCount">0</span>
+              <span class="text-xs font-semibold text-amber-700">chờ duyệt</span>
+            </p>
+          </div>
+        </div>
+        <span class="text-xs font-bold text-amber-600 group-hover:translate-x-0.5 transition-transform shrink-0">
+          Xem →
+        </span>
+      </a>
+    </div>
+
+    <!-- 3. SEARCH & FILTER BAR -->
+    <div class="no-print bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col md:flex-row justify-between items-center gap-4">
+      <div class="w-full md:w-3/4 flex flex-col sm:flex-row items-center gap-3">
+        <!-- Search Input -->
+        <div class="relative w-full">
+          <input
+            type="text"
+            x-model="search"
+            @input.debounce.300ms="fetchCustomers(true)"
+            placeholder="Tìm theo tên đại lý, số điện thoại, email, mã ref..."
+            class="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-[#087b80] focus:border-transparent transition"
+          />
+          <svg class="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="m21 21-4.3-4.3"/>
+          </svg>
+          <template x-if="search">
+            <button
+              @click="search = ''; fetchCustomers(true)"
+              class="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-full w-5 h-5 flex items-center justify-center cursor-pointer"
+            >
+              ✕
+            </button>
+          </template>
+        </div>
+
+        <!-- Tier Filter Dropdown -->
+        <div class="w-full sm:w-48 flex-shrink-0">
+          <select
+            x-model="tierFilter"
+            class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#087b80] cursor-pointer"
+          >
+            <option value="all">Tất cả hạng đại lý</option>
+            <option value="diamond">💎 Kim Cương (≥200Tr)</option>
+            <option value="gold">🥇 Hạng Vàng (≥100Tr)</option>
+            <option value="silver">🥈 Hạng Bạc (≥50Tr)</option>
+            <option value="standard">🏷️ Tiêu chuẩn (&lt;50Tr)</option>
+          </select>
+        </div>
+
+        <!-- Status Filter Dropdown -->
+        <div class="w-full sm:w-48 flex-shrink-0">
+          <select
+            x-model="statusFilter"
+            @change="fetchCustomers(true)"
+            class="w-full px-3 py-2.5 rounded-xl border border-slate-300 text-sm font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#087b80] cursor-pointer"
+          >
+            <option value="all">Tất cả trạng thái</option>
+            <option value="active">Đang hoạt động</option>
+            <option value="inactive">Tạm khóa / Ẩn</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="w-full md:w-auto flex items-center justify-between md:justify-end gap-3 text-xs font-semibold text-slate-500">
+        <template x-if="loading">
+          <span class="flex items-center gap-1.5 text-[#087b80]">
+            <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+            </svg>
+            Đang tải...
+          </span>
+        </template>
+        <span>
+          Hiển thị <strong class="text-slate-900" x-text="filteredCustomers.length"></strong> / <strong class="text-slate-900" x-text="totalCount.toLocaleString('vi-VN')"></strong> đối tác
+        </span>
+      </div>
+    </div>
+
+    {loadError && (
+      <div class="no-print p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700 text-xs font-semibold flex items-center gap-2">
+        <svg class="w-4 h-4 text-red-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <span>{loadError}</span>
+      </div>
+    )}
+
+    <!-- 4. TINH GỌN BẢNG DANH BẠ ĐẠI LÝ B2B: 4 CỘT XEM NHANH CỐT LÕI -->
+    <div class="no-print bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-slate-600">
+          <thead class="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100">
+            <tr>
+              <!-- Cột 1: Đại lý & Kênh liên hệ (~35%) -->
+              <th class="py-3.5 px-4 w-[35%]">Đại lý & Kênh liên hệ</th>
+              <!-- Cột 2: Cấp bậc & Chiết khấu (~25%) -->
+              <th class="py-3.5 px-4 w-[25%]">Cấp bậc & Chiết khấu</th>
+              <!-- Cột 3: Doanh số & Đơn hàng (~22% - Căn phải) -->
+              <th class="py-3.5 px-4 text-right w-[22%]">Doanh số & Đơn hàng</th>
+              <!-- Cột 4: Trạng thái & Thao tác (~18% - Căn giữa/phải) -->
+              <th class="py-3.5 px-4 text-center w-[18%]">Trạng thái & Thao tác</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <template x-if="filteredCustomers.length === 0">
+              <tr>
+                <td colspan="4" class="py-14 text-center text-slate-400">
+                  <div class="flex flex-col items-center justify-center gap-2">
+                    <svg class="w-8 h-8 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="11" cy="11" r="8"/>
+                      <path d="m21 21-4.3-4.3"/>
+                    </svg>
+                    <p class="font-medium text-slate-500">Không tìm thấy đối tác nào phù hợp với bộ lọc.</p>
+                    <button
+                      @click="search = ''; statusFilter = 'all'; tierFilter = 'all'; fetchCustomers(true)"
+                      class="text-xs font-bold text-[#087b80] hover:underline cursor-pointer"
+                    >
+                      Xóa bộ lọc tìm kiếm
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+
+            <template x-for="c in filteredCustomers" :key="c.id">
+              <tr
+                @click="openDetail(c.id)"
+                class="hover:bg-slate-50/90 transition-colors cursor-pointer group"
+              >
+                <!-- CỘT 1: Đại lý & Kênh liên hệ (~35%) -->
+                <td class="py-3.5 px-4">
+                  <!-- Dòng 1: Mã đại lý + Tên đại lý -->
+                  <div class="flex items-center gap-2">
+                    <span
+                      class="whitespace-nowrap font-mono font-bold text-xs bg-teal-50 text-[#087b80] px-2 py-0.5 rounded border border-teal-200/60 shrink-0"
+                      x-text="c.ref"
+                    ></span>
+                    <span class="font-bold text-slate-900 group-hover:text-[#087b80] transition-colors truncate" x-text="c.name"></span>
+                  </div>
+
+                  <!-- Dòng 2: Người đại diện (nếu có) + Số điện thoại + Link Zalo -->
+                  <div class="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-1.5" @click.stop>
+                    <template x-if="c.phone && c.phone !== '—'">
+                      <div class="flex items-center gap-1.5">
+                        <a
+                          :href="'tel:' + c.phone"
+                          class="hover:text-[#087b80] hover:underline font-mono text-slate-600 flex items-center gap-1"
+                          title="Gọi điện thoại"
+                        >
+                          <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+                          </svg>
+                          <span x-text="c.phone"></span>
+                        </a>
+                        <span class="text-slate-300">·</span>
+                        <a
+                          :href="'https://zalo.me/' + c.phone.replace(/[^0-9]/g, '')"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          class="inline-flex items-center gap-0.5 text-[11px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.2 rounded transition"
+                          title="Nhắn tin qua Zalo"
+                        >
+                          <span>Zalo</span>
+                          <span class="text-[9px]">↗</span>
+                        </a>
+                      </div>
+                    </template>
+                    <template x-if="!c.phone || c.phone === '—'">
+                      <span class="text-slate-400 italic">Chưa có SĐT</span>
+                    </template>
+                  </div>
+
+                  <!-- Dòng 3: Tỉnh / Thành phố / Địa chỉ -->
+                  <div class="text-xs text-slate-400 mt-0.5 truncate max-w-sm" x-text="c.street"></div>
+                </td>
+
+                <!-- CỘT 2: Cấp bậc & Chiết khấu (~25%) -->
+                <td class="py-3.5 px-4">
+                  <!-- Dòng 1: Badge Hạng đại lý -->
+                  <div class="flex items-center gap-2">
+                    <span
+                      :class="getTierBadgeClass(c.tierCode)"
+                      class="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold"
+                      x-text="c.tierName || 'Đại lý Tiêu chuẩn'"
+                    ></span>
+                  </div>
+
+                  <!-- Dòng 2: Mức chiết khấu áp dụng -->
+                  <div class="text-xs text-slate-600 font-medium mt-1">
+                    Chiết khấu: <strong class="text-slate-800" x-text="(c.discountNonChicken || 5) + '%'"></strong> / <strong class="text-slate-800" x-text="(c.discountChicken || 7) + '%'"></strong>
+                  </div>
+
+                  <!-- Dòng 3: Tag Thưởng năm (+3%) nếu đạt -->
+                  <template x-if="c.yearEndBonusEligible">
+                    <div class="mt-1">
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        <svg class="w-3.5 h-3.5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <polyline points="20 12 20 22 4 22 4 12"/>
+                          <rect width="20" height="5" x="2" y="7"/>
+                          <line x1="12" y1="22" x2="12" y2="7"/>
+                          <path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/>
+                          <path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/>
+                        </svg>
+                        <span>Đạt thưởng năm (+3%)</span>
+                      </span>
+                    </div>
+                  </template>
+                </td>
+
+                <!-- CỘT 3: Doanh số & Đơn hàng (~22% - Căn phải) -->
+                <td class="py-3.5 px-4 text-right">
+                  <!-- Dòng 1: Doanh số tích lũy năm nổi bật -->
+                  <div class="text-sm sm:text-base font-black text-slate-900" x-text="formatCurrency(c.cumulativeSales || 0)"></div>
+                  <!-- Dòng 2: Số đơn hàng đã chốt -->
+                  <div class="text-xs text-slate-400 mt-0.5 font-medium" x-text="(c.confirmedOrdersCount || 0) + ' đơn đã chốt'"></div>
+                </td>
+
+                <!-- CỘT 4: Trạng thái & Thao tác (~18% - Căn giữa/phải) -->
+                <td class="py-3.5 px-4 text-center" @click.stop>
+                  <div class="flex flex-col items-center justify-center gap-1.5">
+                    <!-- Dòng 1: Badge trạng thái tài khoản -->
+                    <span
+                      :class="c.active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500'"
+                      class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold"
+                    >
+                      <span class="w-1.5 h-1.5 rounded-full" :class="c.active ? 'bg-emerald-500' : 'bg-slate-400'"></span>
+                      <span x-text="c.active ? 'Hoạt động' : 'Tạm khóa'"></span>
+                    </span>
+
+                    <!-- Dòng 2: Nút bấm duy nhất: [Chi tiết →] -->
+                    <button
+                      type="button"
+                      @click="openDetail(c.id)"
+                      class="bg-teal-50 hover:bg-teal-100 text-[#087b80] text-xs font-bold px-3 py-1.5 rounded-lg border border-teal-200/60 transition cursor-pointer"
+                    >
+                      Chi tiết →
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- PAGINATION BAR -->
+      <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs">
+        <span class="text-slate-500">
+          Trang <strong class="text-slate-800" x-text="page"></strong> / <strong class="text-slate-800" x-text="totalPages"></strong>
+        </span>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            @click="changePage(page - 1)"
+            :disabled="page <= 1"
+            class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+          >
+            ← Trang trước
+          </button>
+          <button
+            type="button"
+            @click="changePage(page + 1)"
+            :disabled="page >= totalPages"
+            class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40 cursor-pointer"
+          >
+            Trang sau →
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MẪU IN A4: BẢNG THỐNG KÊ DOANH SỐ TÍCH LŨY ĐẠI LÝ (PRINT-ONLY) -->
+    <div id="print-cumulative-report" class="hidden">
+      <div class="border-b-2 border-black pb-3 mb-4 flex justify-between items-start">
+        <div>
+          <p class="text-xs font-bold uppercase">CÔNG TY TNHH THƯƠNG MẠI DỊCH VỤ LA PET</p>
+          <p class="text-[11px]">Trụ sở & Kho trung tâm: TP. Hồ Chí Minh | Hotline B2B: 0901 234 567</p>
+          <p class="text-[11px]">Hệ thống Quản lý Nguồn lực & Cổng B2B Đại lý LA PET</p>
+        </div>
+        <div class="text-right">
+          <p class="text-xs font-bold">MẪU BÁO CÁO: BC-DSTL-B2B</p>
+          <p class="text-[11px]" x-text="'Ngày xuất báo cáo: ' + new Date().toLocaleDateString('vi-VN')"></p>
+        </div>
+      </div>
+
+      <div class="text-center mb-4">
+        <h2 class="text-lg font-black uppercase">BẢNG THỐNG KÊ DOANH SỐ TÍCH LŨY & PHÂN HẠNG ĐẠI LÝ</h2>
+        <p class="text-xs italic">
+          (Nguồn dữ liệu: Tổng hợp từ các đơn bán sỉ ở trạng thái Đã xác nhận / Đang giao / Hoàn tất theo giá trị chưa VAT)
+        </p>
+      </div>
+
+      <table class="w-full border-collapse border border-black text-[11px] mb-5">
+        <thead>
+          <tr class="bg-slate-100 font-bold text-center">
+            <th class="border border-black p-1.5">STT</th>
+            <th class="border border-black p-1.5 text-left">Mã & Tên đại lý<br/><span class="font-normal text-[10px]">(Mã đối tác & Tên cửa hàng)</span></th>
+            <th class="border border-black p-1.5 text-right">Doanh số tích lũy năm<br/><span class="font-normal text-[10px]">(VND - chưa thuế)</span></th>
+            <th class="border border-black p-1.5">Hạng đại lý hiện tại<br/><span class="font-normal text-[10px]">(50Tr/100Tr/200Tr/500Tr)</span></th>
+            <th class="border border-black p-1.5">Mức chiết khấu bậc thang<br/><span class="font-normal text-[10px]">(Không gà / Quấn gà)</span></th>
+            <th class="border border-black p-1.5 text-right">Doanh số cần đạt thêm<br/><span class="font-normal text-[10px]">(Nâng bậc kế tiếp)</span></th>
+            <th class="border border-black p-1.5 text-right">Thưởng doanh số năm<br/><span class="font-normal text-[10px]">(+3% khi ≥ 100Tr)</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="(c, idx) in filteredCustomers" :key="'print-' + c.id">
+            <tr>
+              <td class="border border-black p-1.5 text-center" x-text="idx + 1"></td>
+              <td class="border border-black p-1.5">
+                <strong x-text="c.ref"></strong> — <span x-text="c.name"></span>
+              </td>
+              <td class="border border-black p-1.5 text-right font-bold" x-text="formatCurrency(c.cumulativeSales || 0)"></td>
+              <td class="border border-black p-1.5 text-center font-bold" x-text="c.tierName"></td>
+              <td class="border border-black p-1.5 text-center" x-text="(c.discountNonChicken || 5) + '% / ' + (c.discountChicken || 7) + '%'"></td>
+              <td class="border border-black p-1.5 text-right" x-text="c.nextTierNeeded > 0 ? formatCurrency(c.nextTierNeeded) : 'Đã đạt đỉnh'"></td>
+              <td class="border border-black p-1.5 text-right font-bold" x-text="c.yearEndBonusEligible ? formatCurrency(c.yearEndBonusAmount) : 'Chưa đủ điều kiện'"></td>
+            </tr>
+          </template>
+        </tbody>
+        <tfoot>
+          <tr class="font-bold bg-slate-50">
+            <td colspan="2" class="border border-black p-1.5 text-right uppercase">Tổng cộng toàn danh sách:</td>
+            <td class="border border-black p-1.5 text-right" x-text="formatCurrency(displayTotalSales)"></td>
+            <td colspan="3" class="border border-black p-1.5 text-right uppercase">Tổng quỹ thưởng năm (+3%) dự kiến:</td>
+            <td class="border border-black p-1.5 text-right" x-text="formatCurrency(displayTotalBonus)"></td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div class="grid grid-cols-3 text-center text-xs mt-8">
+        <div>
+          <p class="font-bold uppercase">Người lập biểu</p>
+          <p class="italic text-[10px]">(Ký, ghi rõ họ tên)</p>
+        </div>
+        <div>
+          <p class="font-bold uppercase">Kế toán công nợ B2B</p>
+          <p class="italic text-[10px]">(Ký, ghi rõ họ tên)</p>
+        </div>
+        <div>
+          <p class="font-bold uppercase">Ban Giám Đốc phê duyệt</p>
+          <p class="italic text-[10px]">(Ký, đóng dấu)</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL TẠO MỚI / CHỈNH SỬA ĐẠI LÝ B2B -->
+    <div
+      x-show="partnerModalOpen"
+      style="display: none;"
+      class="no-print fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4"
+    >
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-lg w-full p-6 space-y-4" @click.away="partnerModalOpen = false">
+        <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+          <h3 class="text-base font-black text-slate-800" x-text="partnerForm.id ? 'Cập nhật Hồ sơ Đại lý B2B' : 'Thêm mới Đại lý B2B'"></h3>
+          <button type="button" @click="partnerModalOpen = false" class="text-slate-400 hover:text-slate-600 font-bold">✕</button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+          <div class="sm:col-span-2">
+            <label class="font-bold text-slate-700 block mb-1">Tên Đại lý / Pet Shop *</label>
+            <input type="text" x-model="partnerForm.name" placeholder="VD: Pet Mart Quận 7" class="w-full px-3 py-2 rounded-xl border border-slate-300" />
+          </div>
+          <div>
+            <label class="font-bold text-slate-700 block mb-1">Mã đối tác (Ref)</label>
+            <input type="text" x-model="partnerForm.ref" placeholder="DL-001" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono" />
+          </div>
+          <div>
+            <label class="font-bold text-slate-700 block mb-1">Mã số thuế (VAT)</label>
+            <input type="text" x-model="partnerForm.vat" placeholder="031xxxxxxx" class="w-full px-3 py-2 rounded-xl border border-slate-300 font-mono" />
+          </div>
+          <div>
+            <label class="font-bold text-slate-700 block mb-1">Số điện thoại nhận OTP</label>
+            <input type="text" x-model="partnerForm.phone" placeholder="0909xxxxxx" class="w-full px-3 py-2 rounded-xl border border-slate-300" />
+          </div>
+          <div>
+            <label class="font-bold text-slate-700 block mb-1">Email nhận mã OTP *</label>
+            <input type="email" x-model="partnerForm.email" placeholder="daily@petshop.vn" class="w-full px-3 py-2 rounded-xl border border-slate-300" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="font-bold text-slate-700 block mb-1">Địa chỉ giao hàng chính</label>
+            <input type="text" x-model="partnerForm.street" placeholder="Số nhà, tên đường, phường/xã..." class="w-full px-3 py-2 rounded-xl border border-slate-300" />
+          </div>
+          <div>
+            <label class="font-bold text-slate-700 block mb-1">Tỉnh / Thành phố</label>
+            <input type="text" x-model="partnerForm.city" placeholder="TP. Hồ Chí Minh" class="w-full px-3 py-2 rounded-xl border border-slate-300" />
+          </div>
+          <div class="flex items-center gap-4 pt-5">
+            <label class="inline-flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" x-model="partnerForm.is_company" class="rounded border-slate-300" />
+              <span class="font-bold text-slate-700">Pháp nhân / Cửa hàng</span>
+            </label>
+            <label class="inline-flex items-center gap-1.5 cursor-pointer">
+              <input type="checkbox" x-model="partnerForm.active" class="rounded border-slate-300" />
+              <span class="font-bold text-emerald-700">Đang hoạt động</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+          <button
+            type="button"
+            @click="partnerModalOpen = false"
+            class="px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50"
+          >
+            Hủy
+          </button>
+          <button
+            type="button"
+            @click="savePartner()"
+            :disabled="savingPartner"
+            class="px-5 py-2 rounded-xl bg-[#087b80] hover:bg-[#066367] text-white text-xs font-bold shadow-xs disabled:opacity-50 cursor-pointer"
+          >
+            <span x-text="savingPartner ? 'Đang lưu dữ liệu...' : 'Lưu hồ sơ đại lý'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE-OVER DRAWER CHI TIẾT KHÁCH HÀNG / ĐẠI LÝ -->
+    <div
+      x-show="drawerOpen"
+      style="display: none;"
+      class="no-print fixed inset-0 z-50 overflow-hidden"
+      role="dialog"
+      aria-modal="true"
+    >
+      <!-- Backdrop -->
+      <div
+        x-show="drawerOpen"
+        x-transition:enter="ease-out duration-300"
+        x-transition:enter-start="opacity-0"
+        x-transition:enter-end="opacity-100"
+        x-transition:leave="ease-in duration-200"
+        x-transition:leave-start="opacity-100"
+        x-transition:leave-end="opacity-0"
+        @click="closeDrawer()"
+        class="fixed inset-0 bg-slate-900/50 backdrop-blur-xs transition-opacity"
+      ></div>
+
+      <div class="fixed inset-y-0 right-0 max-w-full flex pl-10">
+        <div
+          x-show="drawerOpen"
+          x-transition:enter="transform transition ease-in-out duration-300"
+          x-transition:enter-start="translate-x-full"
+          x-transition:enter-end="translate-x-0"
+          x-transition:leave="transform transition ease-in-out duration-300"
+          x-transition:leave-start="translate-x-0"
+          x-transition:leave-end="translate-x-full"
+          class="w-screen max-w-2xl bg-white shadow-2xl flex flex-col"
+        >
+          <!-- Drawer Header -->
+          <div class="p-6 bg-gradient-to-r from-[#083a3c] to-[#087b80] text-white flex justify-between items-start">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-mono font-bold px-2 py-0.5 rounded bg-white/20 text-[#23c1c6] whitespace-nowrap" x-text="selectedCustomer?.ref || 'Mã DL'"></span>
+                <span
+                  :class="selectedCustomer?.active ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/30' : 'bg-slate-500/20 text-slate-300'"
+                  class="text-[11px] font-bold px-2 py-0.5 rounded-full"
+                  x-text="selectedCustomer?.active ? 'Đang hoạt động' : 'Tạm khóa'"
+                ></span>
+                <template x-if="selectedCustomer?.salesSummary?.tierName">
+                  <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-200 border border-amber-300/30 inline-flex items-center gap-1">
+                    <svg class="w-3 h-3 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>
+                      <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+                      <path d="M4 22h16"/>
+                      <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+                      <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+                      <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+                    </svg>
+                    <span x-text="selectedCustomer.salesSummary.tierName"></span>
+                  </span>
+                </template>
+              </div>
+              <h2 class="text-xl font-black mt-2 text-white" x-text="selectedCustomer?.name || 'Chi tiết khách hàng'"></h2>
+              <p class="text-xs text-teal-100/80 mt-0.5" x-text="selectedCustomer?.company_name || 'Thông tin chi tiết đối tác B2B'"></p>
+            </div>
+
+            <button
+              @click="closeDrawer()"
+              class="text-white/80 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer text-lg"
+              title="Đóng (Esc)"
+            >
+              ✕
+            </button>
+          </div>
+
+          <!-- Drawer Body -->
+          <div class="flex-1 overflow-y-auto p-6 space-y-6">
+            <!-- Loading indicator -->
+            <template x-if="loadingDetail">
+              <div class="py-20 flex flex-col items-center justify-center gap-3 text-[#087b80]">
+                <svg class="animate-spin h-8 w-8 text-[#087b80]" fill="none" viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                <p class="text-xs font-bold text-slate-500">Đang tải thông tin hồ sơ đại lý...</p>
+              </div>
+            </template>
+
+            <!-- Error message -->
+            <template x-if="detailError">
+              <div class="p-4 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-bold" x-text="detailError"></div>
+            </template>
+
+            <template x-if="!loadingDetail && selectedCustomer">
+              <div class="space-y-6">
+                <!-- 1. CRM AGGREGATED METRICS -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div class="bg-teal-50/60 p-3.5 rounded-xl border border-teal-100">
+                    <p class="text-[11px] font-bold text-[#087b80] uppercase">Doanh số tích lũy</p>
+                    <p class="text-sm font-black text-[#083a3c] mt-1" x-text="formatCurrency(selectedCustomer.salesSummary?.totalRevenue)"></p>
+                  </div>
+                  <div class="bg-teal-50/60 p-3.5 rounded-xl border border-teal-100">
+                    <p class="text-[11px] font-bold text-[#087b80] uppercase">Đơn xác nhận</p>
+                    <p class="text-sm font-black text-[#083a3c] mt-1" x-text="(selectedCustomer.salesSummary?.totalOrders || 0) + ' đơn'"></p>
+                  </div>
+                  <div class="bg-teal-50/60 p-3.5 rounded-xl border border-teal-100">
+                    <p class="text-[11px] font-bold text-[#087b80] uppercase">Giá trị TB/Đơn</p>
+                    <p class="text-sm font-black text-[#083a3c] mt-1" x-text="formatCurrency(selectedCustomer.salesSummary?.aov)"></p>
+                  </div>
+                  <div class="bg-teal-50/60 p-3.5 rounded-xl border border-teal-100">
+                    <p class="text-[11px] font-bold text-[#087b80] uppercase">Mua gần nhất</p>
+                    <p class="text-sm font-black text-[#083a3c] mt-1" x-text="selectedCustomer.salesSummary?.lastOrderDate || '—'"></p>
+                  </div>
+                </div>
+
+                <!-- 1B. BẢNG CHỈ SỐ HẠNG ĐẠI LÝ & THƯỞNG DOANH SỐ NĂM -->
+                <div class="border border-amber-200 bg-amber-50/40 rounded-xl p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <h3 class="text-xs font-black text-amber-950 uppercase tracking-wider flex items-center gap-1.5">
+                      <svg class="w-4 h-4 text-amber-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>
+                        <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+                        <path d="M4 22h16"/>
+                        <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+                        <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+                        <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+                      </svg>
+                      <span>Chính sách Hạng Đại Lý &amp; Chiết Khấu Bậc Thang</span>
+                    </h3>
+                    <span
+                      :class="getTierBadgeClass(selectedCustomer.salesSummary?.tierCode)"
+                      class="px-2.5 py-0.5 rounded-full text-xs font-bold"
+                      x-text="selectedCustomer.salesSummary?.tierName || 'Đại lý Tiêu chuẩn'"
+                    ></span>
+                  </div>
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div class="bg-white p-3 rounded-lg border border-amber-100">
+                      <span class="text-slate-500 block">Chiết khấu bậc thang:</span>
+                      <p class="font-bold text-slate-900 mt-1" x-text="selectedCustomer.salesSummary?.discountLabel || 'Không gà: 5% | Quấn gà: 7%'"></p>
+                    </div>
+                    <div class="bg-white p-3 rounded-lg border border-amber-100">
+                      <span class="text-slate-500 block">Doanh số cần đạt thêm:</span>
+                      <p class="font-bold text-[#087b80] mt-1" x-text="selectedCustomer.salesSummary?.nextTierNeeded > 0 ? ('+ ' + formatCurrency(selectedCustomer.salesSummary.nextTierNeeded)) : 'Đã đạt mốc cao nhất'"></p>
+                      <span class="text-[10px] text-slate-400" x-text="'Mục tiêu: ' + (selectedCustomer.salesSummary?.nextTierName || '')"></span>
+                    </div>
+                    <div class="bg-white p-3 rounded-lg border border-amber-100">
+                      <span class="text-slate-500 block">Thưởng doanh số năm (+3%):</span>
+                      <p
+                        class="font-black mt-1"
+                        :class="selectedCustomer.salesSummary?.yearEndBonusEligible ? 'text-emerald-700' : 'text-slate-400'"
+                        x-text="selectedCustomer.salesSummary?.yearEndBonusEligible ? ('Đạt: ' + formatCurrency(selectedCustomer.salesSummary.yearEndBonusAmount)) : 'Chưa đạt ngưỡng 100Tr'"
+                      ></p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 2. DIRECTUS DEALER REGISTRATION BADGE (IF LINKED) -->
+                <template x-if="selectedCustomer.dealerRegistration">
+                  <div class="bg-emerald-50/70 border border-emerald-200 p-4 rounded-xl">
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4 text-emerald-800 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <rect width="16" height="20" x="4" y="2" rx="2" ry="2"/>
+                          <path d="M9 22v-4h6v4"/>
+                          <path d="M8 6h.01"/><path d="M16 6h.01"/>
+                          <path d="M8 10h.01"/><path d="M16 10h.01"/>
+                          <path d="M8 14h.01"/><path d="M16 14h.01"/>
+                        </svg>
+                        <span class="text-xs font-black text-emerald-900 uppercase">Hồ sơ đại lý Directus B2B</span>
+                      </div>
+                      <span
+                        class="text-[11px] font-bold px-2 py-0.5 rounded-full capitalize"
+                        :class="{
+                          'bg-amber-100 text-amber-800': selectedCustomer.dealerRegistration.status === 'pending',
+                          'bg-blue-100 text-blue-800': selectedCustomer.dealerRegistration.status === 'contacted',
+                          'bg-emerald-100 text-emerald-800': selectedCustomer.dealerRegistration.status === 'approved',
+                          'bg-slate-100 text-slate-600': selectedCustomer.dealerRegistration.status === 'rejected'
+                        }"
+                        x-text="selectedCustomer.dealerRegistration.status === 'approved' ? 'Đã duyệt đại lý' : selectedCustomer.dealerRegistration.status"
+                      ></span>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 mt-3 text-xs">
+                      <div>
+                        <span class="text-slate-500">Tên cửa hàng:</span>
+                        <p class="font-bold text-slate-800" x-text="selectedCustomer.dealerRegistration.store_name"></p>
+                      </div>
+                      <div>
+                        <span class="text-slate-500">Mô hình kinh doanh:</span>
+                        <p class="font-bold text-slate-800" x-text="selectedCustomer.dealerRegistration.business_model"></p>
+                      </div>
+                      <div>
+                        <span class="text-slate-500">Tỉnh / Thành phố:</span>
+                        <p class="font-bold text-slate-800" x-text="selectedCustomer.dealerRegistration.city"></p>
+                      </div>
+                      <div>
+                        <span class="text-slate-500">Ngày gửi hồ sơ:</span>
+                        <p class="font-bold text-slate-800" x-text="selectedCustomer.dealerRegistration.created_at ? selectedCustomer.dealerRegistration.created_at.split('T')[0] : '—'"></p>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
+                <!-- 3. THÔNG TIN DOANH NGHIỆP & PHÁP LÝ -->
+                <div class="border border-slate-200 rounded-xl p-4 bg-slate-50/50 space-y-3">
+                  <h3 class="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <svg class="w-4 h-4 text-slate-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                      <line x1="16" y1="13" x2="8" y2="13"/>
+                      <line x1="16" y1="17" x2="8" y2="17"/>
+                      <polyline points="10 9 9 9 8 9"/>
+                    </svg>
+                    <span>Thông tin Doanh nghiệp &amp; Liên hệ</span>
+                  </h3>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span class="text-slate-500">Mã số thuế (VAT):</span>
+                      <p class="font-bold text-slate-900 font-mono mt-0.5" x-text="selectedCustomer.vat || '—'"></p>
+                    </div>
+                    <div>
+                      <span class="text-slate-500">Pháp nhân / Công ty:</span>
+                      <p class="font-bold text-slate-900 mt-0.5" x-text="selectedCustomer.company_name || 'Cá nhân'"></p>
+                    </div>
+                    <div>
+                      <span class="text-slate-500">Số điện thoại:</span>
+                      <p class="mt-0.5">
+                        <template x-if="selectedCustomer.phone && selectedCustomer.phone !== '—'">
+                          <a :href="'tel:' + selectedCustomer.phone" class="font-bold text-[#087b80] hover:underline inline-flex items-center gap-1">
+                            <svg class="w-3 h-3 text-[#087b80]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+                            </svg>
+                            <span x-text="selectedCustomer.phone"></span>
+                          </a>
+                        </template>
+                        <template x-if="!selectedCustomer.phone || selectedCustomer.phone === '—'">
+                          <span class="text-slate-400">—</span>
+                        </template>
+                      </p>
+                    </div>
+                    <div>
+                      <span class="text-slate-500">Email:</span>
+                      <p class="mt-0.5">
+                        <template x-if="selectedCustomer.email && selectedCustomer.email !== '—'">
+                          <a :href="'mailto:' + selectedCustomer.email" class="font-medium text-slate-800 hover:text-[#087b80] hover:underline" x-text="selectedCustomer.email"></a>
+                        </template>
+                        <template x-if="!selectedCustomer.email || selectedCustomer.email === '—'">
+                          <span class="text-slate-400">—</span>
+                        </template>
+                      </p>
+                    </div>
+                    <div class="sm:col-span-2">
+                      <span class="text-slate-500">Địa chỉ chính:</span>
+                      <p class="font-medium text-slate-800 mt-0.5" x-text="selectedCustomer.street || '—'"></p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 4. ĐỊA CHỈ GIAO HÀNG PHỤ (CHILD_IDS) -->
+                <div class="border border-slate-200 rounded-xl p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <h3 class="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <svg class="w-4 h-4 text-slate-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect width="16" height="13" x="1" y="3" rx="2"/>
+                        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/>
+                        <circle cx="5.5" cy="18.5" r="2.5"/>
+                        <circle cx="18.5" cy="18.5" r="2.5"/>
+                      </svg>
+                      <span>Địa chỉ giao hàng phụ (Delivery Addresses)</span>
+                    </h3>
+                    <span class="text-[11px] font-bold text-slate-400" x-text="(selectedCustomer.deliveryAddresses?.length || 0) + ' địa chỉ'"></span>
+                  </div>
+
+                  <template x-if="!selectedCustomer.deliveryAddresses || selectedCustomer.deliveryAddresses.length === 0">
+                    <p class="text-xs text-slate-400 italic py-2">
+                      Chưa thiết lập địa chỉ giao hàng phụ. Hệ thống mặc định giao theo địa chỉ chính.
+                    </p>
+                  </template>
+
+                  <template x-if="selectedCustomer.deliveryAddresses && selectedCustomer.deliveryAddresses.length > 0">
+                    <div class="space-y-2">
+                      <template x-for="addr in selectedCustomer.deliveryAddresses" :key="addr.id">
+                        <div class="p-2.5 bg-slate-50 rounded-lg text-xs border border-slate-100 flex items-start justify-between gap-2">
+                          <div>
+                            <p class="font-bold text-slate-800" x-text="addr.name"></p>
+                            <p class="text-slate-600 mt-0.5" x-text="addr.address"></p>
+                          </div>
+                          <span class="font-mono text-[11px] text-[#087b80] whitespace-nowrap" x-text="addr.phone"></span>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- 5. ĐƠN HÀNG GẦN NHẤT (RECENT ORDERS) -->
+                <div class="border border-slate-200 rounded-xl p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <h3 class="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <svg class="w-4 h-4 text-slate-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m7.5 4.27 9 5.15"/>
+                        <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>
+                        <path d="m3.3 7 8.7 5 8.7-5"/>
+                        <path d="M12 22V12"/>
+                      </svg>
+                      <span>Lịch sử Đơn hàng gần nhất</span>
+                    </h3>
+                    <a href="/admin/don-hang" class="text-[11px] font-bold text-[#087b80] hover:underline">
+                      Xem tất cả đơn →
+                    </a>
+                  </div>
+
+                  <template x-if="!selectedCustomer.recentOrders || selectedCustomer.recentOrders.length === 0">
+                    <p class="text-xs text-slate-400 italic py-2">
+                      Khách hàng chưa có lịch sử đơn hàng nào trên hệ thống.
+                    </p>
+                  </template>
+
+                  <template x-if="selectedCustomer.recentOrders && selectedCustomer.recentOrders.length > 0">
+                    <div class="divide-y divide-slate-100 border border-slate-100 rounded-lg overflow-hidden">
+                      <template x-for="ord in selectedCustomer.recentOrders" :key="ord.id">
+                        <div class="p-3 bg-white hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 text-xs">
+                          <div>
+                            <div class="flex items-center gap-2">
+                              <a
+                                :href="'/admin/don-hang/' + ord.id"
+                                class="font-mono font-bold text-[#087b80] hover:underline whitespace-nowrap"
+                                x-text="ord.name"
+                              ></a>
+                              <span
+                                :class="getStatusBadgeClass(ord.state)"
+                                class="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                                x-text="getStatusLabel(ord.state)"
+                              ></span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 mt-0.5" x-text="ord.date"></p>
+                          </div>
+                          <div class="text-right">
+                            <p class="font-bold text-slate-900" x-text="formatCurrency(ord.amount)"></p>
+                            <a
+                              :href="'/admin/don-hang/' + ord.id"
+                              class="text-[11px] font-semibold text-[#087b80] hover:underline"
+                            >
+                              Chi tiết đơn
+                            </a>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- Drawer Footer -->
+          <div class="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap justify-between items-center gap-2">
+            <div class="flex items-center gap-2">
+              <template x-if="selectedCustomer">
+                <button
+                  type="button"
+                  @click="openChangeCustomerPasswordModal(selectedCustomer)"
+                  class="px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                  title="Đổi mật khẩu cho đại lý này"
+                >
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="7.5" cy="15.5" r="5.5"/>
+                    <path d="m21 2-9.6 9.6"/>
+                    <path d="m15.5 7.5 3 3L22 7l-3-3"/>
+                  </svg>
+                  <span>Đổi mật khẩu</span>
+                </button>
+              </template>
+              <template x-if="selectedCustomer">
+                <button
+                  type="button"
+                  @click="openEditModal(selectedCustomer)"
+                  class="px-3.5 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <svg class="w-3.5 h-3.5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                    <path d="m15 5 4 4"/>
+                  </svg>
+                  <span>Sửa thông tin</span>
+                </button>
+              </template>
+              <template x-if="selectedCustomer">
+                <button
+                  type="button"
+                  @click="togglePartnerActive(selectedCustomer)"
+                  :class="selectedCustomer.active ? 'border-rose-200 text-rose-700 hover:bg-rose-50' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'"
+                  class="px-3.5 py-2 bg-white border text-xs font-bold rounded-xl transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <template x-if="selectedCustomer.active">
+                    <svg class="w-3.5 h-3.5 text-rose-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+                      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                    </svg>
+                  </template>
+                  <template x-if="!selectedCustomer.active">
+                    <svg class="w-3.5 h-3.5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+                      <path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+                    </svg>
+                  </template>
+                  <span x-text="selectedCustomer.active ? 'Tạm khóa đại lý' : 'Mở khóa đại lý'"></span>
+                </button>
+              </template>
+            </div>
+
+            <button
+              @click="closeDrawer()"
+              class="px-5 py-2 bg-[#087b80] hover:bg-[#066367] text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer"
+            >
+              Đóng chi tiết
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL ĐỔI MẬT KHẨU CHO KHÁCH HÀNG / ĐẠI LÝ -->
+    <div
+      x-show="pwdModalOpen"
+      x-cloak
+      class="no-print fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4"
+    >
+      <div 
+        @click.outside="pwdModalOpen = false" 
+        class="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden"
+      >
+        <div class="p-5 bg-gradient-to-r from-slate-900 to-slate-800 text-white flex justify-between items-center">
+          <div class="flex items-center gap-2">
+            <svg class="w-5 h-5 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="7.5" cy="15.5" r="5.5"/>
+              <path d="m21 2-9.6 9.6"/>
+              <path d="m15.5 7.5 3 3L22 7l-3-3"/>
+            </svg>
+            <div>
+              <h3 class="text-sm font-bold text-white">Đổi Mật Khẩu Đại Lý</h3>
+              <p class="text-xs text-slate-300 mt-0.5" x-text="pwdCustomer ? (pwdCustomer.name + ' (' + pwdCustomer.ref + ')') : ''"></p>
+            </div>
+          </div>
+          <button @click="pwdModalOpen = false" class="text-slate-400 hover:text-white text-lg p-1 cursor-pointer">✕</button>
+        </div>
+
+        <form @submit.prevent="saveCustomerPassword()" class="p-5 space-y-4">
+          <div x-show="pwdErrorMsg" x-text="pwdErrorMsg" class="p-3 bg-rose-50 text-rose-600 text-xs font-semibold rounded-xl border border-rose-200"></div>
+          <div x-show="pwdSuccessMsg" x-text="pwdSuccessMsg" class="p-3 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-xl border border-emerald-200"></div>
+
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <label class="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Mật khẩu mới
+              </label>
+              <button 
+                type="button" 
+                @click="generateRandomPassword()" 
+                class="text-xs text-[#087b80] hover:underline font-bold cursor-pointer inline-flex items-center gap-1"
+              >
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="18" height="18" x="3" y="3" rx="2" ry="2"/>
+                  <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/>
+                  <circle cx="15.5" cy="8.5" r="1.5" fill="currentColor"/>
+                  <circle cx="15.5" cy="15.5" r="1.5" fill="currentColor"/>
+                  <circle cx="8.5" cy="15.5" r="1.5" fill="currentColor"/>
+                  <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+                </svg>
+                <span>Tạo ngẫu nhiên</span>
+              </button>
+            </div>
+            <input
+              type="text"
+              x-model="newCustomerPwd"
+              required
+              minlength="6"
+              placeholder="Nhập tối thiểu 6 ký tự..."
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+            <p class="text-[11px] text-slate-400 mt-1">Đại lý sẽ sử dụng mật khẩu này cùng SĐT/Email để đăng nhập vào B2B Portal.</p>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              @click="pwdModalOpen = false"
+              class="px-4 py-2 rounded-xl border border-slate-300 text-xs font-bold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
+            >
+              Hủy
+            </button>
+            <button
+              type="submit"
+              :disabled="savingCustomerPwd"
+              class="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
+            >
+              <span x-text="savingCustomerPwd ? 'Đang lưu...' : 'Lưu mật khẩu mới'"></span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</AdminLayout>

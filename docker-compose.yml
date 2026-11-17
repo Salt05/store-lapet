@@ -1,0 +1,73 @@
+
+services:
+  # 1. Cơ sở dữ liệu quan hệ PostgreSQL 16
+  lapet-postgres:
+    image: postgres:16-alpine
+    container_name: lapet-postgres
+    restart: unless-stopped
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-crmuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zalocrm_secure_password}
+      POSTGRES_DB: ${POSTGRES_DB:-zalocrm}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-crmuser} -d ${POSTGRES_DB:-zalocrm}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. Microservice OTP Email (Chạy chế độ In-Memory RAM Store siêu nhẹ, không cần Redis)
+  lapet-otp:
+    build:
+      context: ./email-otp-service
+      dockerfile: Dockerfile
+    container_name: lapet-otp
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-lapet_otp_internal_2026}
+      - OTP_EXPIRY_SECONDS=300
+      - OTP_COOLDOWN_SECONDS=60
+      - OTP_MAX_ATTEMPTS=5
+
+  # 3. Storefront & Admin Portal Astro SSR Standalone
+  lapet-store:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lapet-store
+    restart: unless-stopped
+    ports:
+      - "4321:4321"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=4321
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-crmuser}:${POSTGRES_PASSWORD:-zalocrm_secure_password}@lapet-postgres:5432/${POSTGRES_DB:-zalocrm}
+      - EMAIL_OTP_SERVICE_URL=http://lapet-otp:4000
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-lapet_otp_internal_2026}
+      - AUTH_SECRET=${AUTH_SECRET:-la-pet-store-secure-hmac-salt-secret-key-2026}
+      - ODOO_URL=${ODOO_URL:-https://odoo.lapetvietnam.com}
+      - ODOO_DB=${ODOO_DB:-odoo_it_test_20260905}
+      - ODOO_USER=${ODOO_USER:-sale.order01@gmai.com}
+      - ODOO_API_KEY=${ODOO_API_KEY:-b09c7fa1deb1103abb6820be7d1d99c16129a243}
+      - VNPAY_URL=${VNPAY_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+      - VNPAY_TMN_CODE=${VNPAY_TMN_CODE:-BPFUA1FN}
+      - VNPAY_HASH_SECRET=${VNPAY_HASH_SECRET:-RTPQJQXHOGYLLQWDCXNRHYVKAIXNHOZU}
+      - VNPAY_RETURN_URL=${VNPAY_RETURN_URL:-http://localhost:4321/api/payment/vnpay-callback}
+    depends_on:
+      lapet-postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

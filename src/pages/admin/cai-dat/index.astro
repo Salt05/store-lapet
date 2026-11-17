@@ -1,0 +1,1431 @@
+---
+// src/pages/admin/cai-dat/index.astro
+import AdminLayout from '@/layouts/AdminLayout.astro';
+import { configService } from '@/services/config.service';
+
+export const prerender = false;
+
+const baseDiscount = await configService.getBaseDiscountPercent();
+const longtermPolicy = await configService.getLongtermPolicy();
+const integrations = await configService.getIntegrationsConfig();
+const allConfigs = await configService.getAllConfigs();
+
+const defaultCompanyInfo = {
+  company_name: 'CÔNG TY TNHH THƯƠNG MẠI DỊCH VỤ LA PET',
+  tax_id: '0318123456',
+  address: 'Số 123 Đường D2, Phường 25, Quận Bình Thạnh, TP. Hồ Chí Minh',
+  hotline: '0909 203 166',
+  email: 'contact@lapet.vn',
+  website: 'https://lapet.vn',
+  representative_name: 'Nguyễn Văn Phát',
+  representative_title: 'Giám Đốc Điều Hành',
+};
+
+const defaultNotificationConfig = {
+  admin_email: 'admin@lapet.vn',
+  notify_on_dealer_register: true,
+  notify_on_new_order: true,
+};
+
+const defaultVnpayConfig = {
+  url: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
+  tmn_code: 'BPFUA1FN',
+  hash_secret: '••••••••••••••••••••••••••••••••',
+  return_url: 'http://localhost:4321/api/payment/vnpay-callback',
+};
+
+const defaultSmtpConfig = {
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false,
+  user: '',
+  password: '••••••••••••••••',
+  sender_name: 'LA PET B2B Notification System',
+  sender_email: '',
+};
+
+const companyInfo = { ...defaultCompanyInfo, ...(allConfigs.get('company_info') || {}) };
+const notificationConfig = { ...defaultNotificationConfig, ...(allConfigs.get('notification_config') || {}) };
+const vnpayConfig = { ...defaultVnpayConfig, ...(allConfigs.get('vnpay_config') || {}) };
+const smtpConfig = { ...defaultSmtpConfig, ...(allConfigs.get('smtp_config') || {}) };
+---
+
+<AdminLayout title="Cấu hình Dịch vụ & Kết nối Hệ thống (DB)" activeNav="configs">
+  <div 
+    class="space-y-6" 
+    x-data={`{
+      activeTab: 'company',
+      companyInfo: ${JSON.stringify(companyInfo)},
+      notificationConfig: ${JSON.stringify(notificationConfig)},
+      vnpayConfig: ${JSON.stringify(vnpayConfig)},
+      smtpConfig: ${JSON.stringify(smtpConfig)},
+      integrations: ${JSON.stringify(integrations)},
+      baseDiscount: ${baseDiscount},
+      longtermPolicy: ${JSON.stringify(longtermPolicy)},
+      saving: false,
+      message: '',
+      smtpTestLoading: false,
+      smtpTestResult: null,
+      testLoading: { directus: false, emailOtp: false },
+      testStatus: { directus: null, emailOtp: null },
+      adminCurrentPwd: '',
+      adminNewPwd: '',
+      adminConfirmPwd: '',
+      pwdSubmitting: false,
+      pwdMsg: '',
+      pwdErr: false,
+
+      async changeAdminPassword() {
+        this.pwdMsg = '';
+        this.pwdErr = false;
+        if (!this.adminCurrentPwd) {
+          this.pwdMsg = 'Vui lòng nhập mật khẩu hiện tại';
+          this.pwdErr = true;
+          return;
+        }
+        if (this.adminNewPwd.length < 6) {
+          this.pwdMsg = 'Mật khẩu mới phải từ 6 ký tự trở lên';
+          this.pwdErr = true;
+          return;
+        }
+        if (this.adminNewPwd !== this.adminConfirmPwd) {
+          this.pwdMsg = 'Xác nhận mật khẩu mới không trùng khớp';
+          this.pwdErr = true;
+          return;
+        }
+
+        this.pwdSubmitting = true;
+        try {
+          const res = await fetch('/api/admin/auth/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              currentPassword: this.adminCurrentPwd,
+              newPassword: this.adminNewPwd,
+              confirmPassword: this.adminConfirmPwd,
+            })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            this.pwdMsg = '✓ ' + (data.message || 'Đổi mật khẩu thành công!');
+            this.adminCurrentPwd = '';
+            this.adminNewPwd = '';
+            this.adminConfirmPwd = '';
+          } else {
+            this.pwdMsg = data.error || 'Đổi mật khẩu thất bại';
+            this.pwdErr = true;
+          }
+        } catch {
+          this.pwdMsg = 'Lỗi kết nối máy chủ';
+          this.pwdErr = true;
+        } finally {
+          this.pwdSubmitting = false;
+        }
+      },
+
+      async saveCompanyInfo() {
+        this.saving = true;
+        this.message = '';
+        try {
+          const res = await fetch('/api/admin/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'save_company_info', value: this.companyInfo })
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.message = '✓ ' + (data.message || 'Đã lưu thông tin pháp nhân công ty & email liên hệ!');
+          } else {
+            alert(data.error || 'Lỗi lưu thông tin');
+          }
+        } catch {
+          alert('Lỗi kết nối máy chủ');
+        } finally {
+          this.saving = false;
+        }
+      },
+
+      async saveNotificationConfig() {
+        this.saving = true;
+        this.message = '';
+        try {
+          const res = await fetch('/api/admin/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'save_notification_config', value: this.notificationConfig })
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.message = '✓ ' + (data.message || 'Đã lưu cấu hình Email Nhận Thông Báo Quản Trị!');
+          } else {
+            alert(data.error || 'Lỗi lưu cấu hình thông báo');
+          }
+        } catch {
+          alert('Lỗi kết nối máy chủ');
+        } finally {
+          this.saving = false;
+        }
+      },
+
+      async saveVnPayConfig() {
+        this.saving = true;
+        this.message = '';
+        try {
+          const res = await fetch('/api/admin/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'save_vnpay_config', value: this.vnpayConfig })
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.message = '✓ ' + (data.message || 'Đã lưu cấu hình Cổng VNPAY!');
+          } else {
+            alert(data.error || 'Lỗi lưu cấu hình VNPAY');
+          }
+        } catch {
+          alert('Lỗi kết nối máy chủ');
+        } finally {
+          this.saving = false;
+        }
+      },
+
+      async saveSmtpConfig() {
+        this.saving = true;
+        this.message = '';
+        try {
+          const res = await fetch('/api/admin/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'save_smtp_config', value: this.smtpConfig })
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.message = '✓ ' + (data.message || 'Đã lưu cấu hình máy chủ SMTP!');
+          } else {
+            alert(data.error || 'Lỗi lưu cấu hình SMTP');
+          }
+        } catch {
+          alert('Lỗi kết nối máy chủ');
+        } finally {
+          this.saving = false;
+        }
+      },
+
+      async testSmtp() {
+        this.smtpTestLoading = true;
+        this.smtpTestResult = null;
+        try {
+          const target = this.notificationConfig.admin_email || this.companyInfo.email;
+          const res = await fetch('/api/admin/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'test_smtp',
+              config: this.smtpConfig,
+              target_email: target
+            })
+          });
+          const data = await res.json();
+          this.smtpTestResult = data;
+          if (data.success) {
+            this.message = '✓ ' + data.message;
+          }
+        } catch {
+          this.smtpTestResult = { success: false, error: 'Không thể kết nối máy chủ kiểm tra SMTP' };
+        } finally {
+          this.smtpTestLoading = false;
+        }
+      },
+      // Live Health Monitor State
+      healthLoading: false,
+      lastChecked: null,
+      healthServices: {
+        postgres: { status: 'loading', latencyMs: 0, details: '' },
+        directus: { status: 'loading', latencyMs: 0, details: '' },
+        emailOtp: { status: 'loading', latencyMs: 0, details: '' },
+      },
+
+      async checkHealth() {
+        this.healthLoading = true;
+        try {
+          const res = await fetch('/api/admin/health');
+          const data = await res.json();
+          if (data.success && data.services) {
+            this.healthServices = data.services;
+            this.lastChecked = new Date().toLocaleTimeString('vi-VN');
+          }
+        } catch (e) {
+          console.error('Lỗi khi thăm dò sức khỏe dịch vụ:', e);
+        } finally {
+          this.healthLoading = false;
+        }
+      },
+
+      getLatencyClass(svc) {
+        if (!svc || svc.status !== 'healthy') return 'text-rose-700 bg-rose-50 border-rose-200';
+        if (svc.latencyMs < 300) return 'text-emerald-700 bg-emerald-50 border-emerald-200';
+        if (svc.latencyMs <= 1000) return 'text-amber-700 bg-amber-50 border-amber-200';
+        return 'text-orange-700 bg-orange-50 border-orange-200';
+      },
+
+      getLatencyText(svc) {
+        if (!svc || svc.status === 'loading') return 'Đang đo...';
+        if (svc.status !== 'healthy') return 'Không phản hồi';
+        return svc.latencyMs + ' ms';
+      },
+
+      async saveIntegrations() {
+        this.saving = true;
+        this.message = '';
+        try {
+          const res = await fetch('/api/admin/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'save_integrations',
+              value: this.integrations
+            })
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.message = '✓ Đã lưu cấu hình kết nối Directus và Email OTP vào DB thành công!';
+            this.checkHealth();
+          } else {
+            alert('Lỗi: ' + (data.error || 'Lưu thất bại'));
+          }
+        } catch {
+          alert('Lỗi kết nối máy chủ');
+        } finally {
+          this.saving = false;
+        }
+      },
+
+      async testDirectus() {
+        this.testLoading.directus = true;
+        this.testStatus.directus = null;
+        try {
+          const res = await fetch('/api/admin/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'test_connection',
+              service: 'directus',
+              config: this.integrations.directus
+            })
+          });
+          const data = await res.json();
+          this.testStatus.directus = data;
+          this.checkHealth();
+        } catch (e) {
+          this.testStatus.directus = { success: false, error: 'Không thể gửi yêu cầu kiểm tra' };
+        } finally {
+          this.testLoading.directus = false;
+        }
+      },
+
+      async testEmailOtp() {
+        this.testLoading.emailOtp = true;
+        this.testStatus.emailOtp = null;
+        try {
+          const res = await fetch('/api/admin/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'test_connection',
+              service: 'emailOtp',
+              config: { url: this.integrations.emailOtp.url }
+            })
+          });
+          const data = await res.json();
+          this.testStatus.emailOtp = data;
+          this.checkHealth();
+        } catch (e) {
+          this.testStatus.emailOtp = { success: false, error: 'Không thể gửi yêu cầu kiểm tra Email OTP' };
+        } finally {
+          this.testLoading.emailOtp = false;
+        }
+      },
+
+      async saveBaseDiscount() {
+        this.saving = true;
+        this.message = '';
+        try {
+          const res = await fetch('/api/admin/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'save_system_config',
+              key: 'base_discount_percent',
+              value: Number(this.baseDiscount)
+            })
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.message = '✓ Đã cập nhật chiết khấu cơ bản (' + this.baseDiscount + '%) thành công vào DB!';
+          } else {
+            alert(data.error);
+          }
+        } catch {
+          alert('Lỗi lưu cấu hình chiết khấu');
+        } finally {
+          this.saving = false;
+        }
+      },
+
+      async saveLongtermPolicy() {
+        this.saving = true;
+        this.message = '';
+        try {
+          const res = await fetch('/api/admin/configs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'save_system_config',
+              key: 'longterm_policy',
+              value: this.longtermPolicy
+            })
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.message = '✓ Đã cập nhật chính sách thưởng doanh số tích lũy dài hạn (Năm & Quý) vào DB thành công!';
+          } else {
+            alert(data.error);
+          }
+        } catch {
+          alert('Lỗi lưu chính sách doanh số dài hạn');
+        } finally {
+          this.saving = false;
+        }
+      }
+    }`}
+    x-init="checkHealth(); setInterval(() => checkHealth(), 30000);"
+  >
+
+    <!-- ========================================================================= -->
+    <!-- LIVE HEALTH MONITOR WIDGET -->
+    <!-- ========================================================================= -->
+    <div class="bg-white p-6 rounded-3xl border border-brand-border shadow-xs space-y-5">
+      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-brand-sand pb-4">
+        <div>
+          <div class="flex items-center gap-2.5">
+            <span class="relative flex h-3 w-3">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-accent opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-3 w-3 bg-brand-primary"></span>
+            </span>
+            <h2 class="text-base font-black text-brand-dark tracking-tight">
+              Bảng Giám Sát Sức Khỏe Dịch Vụ Thời Gian Thực (Live Health Monitor)
+            </h2>
+          </div>
+          <p class="text-xs text-brand-muted mt-1">
+            Đo trực tiếp độ trễ phản hồi (latency ms) và trạng thái kết nối mạng của 3 dịch vụ cốt lõi.
+            <template x-if="lastChecked">
+              <span class="text-brand-primary font-bold ml-1" x-text="'(Cập nhật: ' + lastChecked + ')'"></span>
+            </template>
+          </p>
+        </div>
+
+        <!-- REFRESH BUTTON -->
+        <button
+          @click="checkHealth()"
+          :disabled="healthLoading"
+          class="px-4 py-2 bg-slate-100 hover:bg-[#087b80] hover:text-white text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-2 shrink-0 border border-slate-200 disabled:opacity-50"
+          title="Thăm dò lại tất cả 3 dịch vụ"
+        >
+          <svg
+            class="w-4 h-4 transition-transform duration-500"
+            :class="healthLoading ? 'animate-spin text-[#23c1c6]' : 'text-slate-600 group-hover:text-white'"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+          </svg>
+          <span x-text="healthLoading ? 'Đang kiểm tra...' : 'Kiểm tra lại tất cả'"></span>
+        </button>
+      </div>
+
+      <!-- 3 SERVICE HEALTH CARDS -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <!-- 1. PostgreSQL Database Card -->
+        <div class="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 hover:bg-white hover:border-[#087b80]/40 hover:shadow-xs transition-all flex flex-col justify-between space-y-3">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-[#083a3c]/10 text-[#083a3c] flex items-center justify-center">
+                <svg class="w-5 h-5 text-[#083a3c]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                  <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                  <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-sm text-slate-900 leading-tight">PostgreSQL 16</h3>
+                <p class="text-2xs text-slate-500 font-medium mt-0.5">Core DB (Đơn, Kho & Đại lý)</p>
+              </div>
+            </div>
+
+            <!-- Status Badge -->
+            <span
+              :class="healthServices.postgres.status === 'healthy' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : (healthServices.postgres.status === 'loading' ? 'bg-slate-100 text-slate-500 border-slate-200' : 'bg-rose-50 text-rose-700 border-rose-200')"
+              class="px-2.5 py-0.5 rounded-full text-2xs font-extrabold border shrink-0 flex items-center gap-1"
+            >
+              <span 
+                :class="healthServices.postgres.status === 'healthy' ? 'bg-emerald-500' : (healthServices.postgres.status === 'loading' ? 'bg-slate-400' : 'bg-rose-500')"
+                class="w-1.5 h-1.5 rounded-full"
+              ></span>
+              <span x-text="healthServices.postgres.status === 'healthy' ? 'Đang chạy' : (healthServices.postgres.status === 'loading' ? 'Đang đo...' : 'Mất kết nối')"></span>
+            </span>
+          </div>
+
+          <div class="space-y-1.5 pt-1 border-t border-slate-200/60">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-500 font-medium">Độ trễ (Latency):</span>
+              <span
+                :class="getLatencyClass(healthServices.postgres)"
+                class="font-black px-2 py-0.5 rounded-md text-2xs border font-mono"
+                x-text="getLatencyText(healthServices.postgres)"
+              ></span>
+            </div>
+            <div class="text-2xs text-slate-600 truncate font-mono" :title="healthServices.postgres.details || healthServices.postgres.error">
+              <span class="text-slate-400">Chi tiết:</span>
+              <span class="font-medium ml-1" x-text="healthServices.postgres.details || healthServices.postgres.error || 'Chưa có dữ liệu'"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Directus CMS Card -->
+        <div class="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 hover:bg-white hover:border-[#087b80]/40 hover:shadow-xs transition-all flex flex-col justify-between space-y-3">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-[#087b80]/10 text-[#087b80] flex items-center justify-center">
+                <svg class="w-5 h-5 text-[#087b80]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-sm text-slate-900 leading-tight">Directus CMS</h3>
+                <p class="text-2xs text-slate-500 font-medium mt-0.5">REST API (Data & Media)</p>
+              </div>
+            </div>
+
+            <!-- Status Badge -->
+            <span
+              :class="healthServices.directus.status === 'healthy' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : (healthServices.directus.status === 'loading' ? 'bg-slate-100 text-slate-500 border-slate-200' : 'bg-rose-50 text-rose-700 border-rose-200')"
+              class="px-2.5 py-0.5 rounded-full text-2xs font-extrabold border shrink-0 flex items-center gap-1"
+            >
+              <span 
+                :class="healthServices.directus.status === 'healthy' ? 'bg-emerald-500' : (healthServices.directus.status === 'loading' ? 'bg-slate-400' : 'bg-rose-500')"
+                class="w-1.5 h-1.5 rounded-full"
+              ></span>
+              <span x-text="healthServices.directus.status === 'healthy' ? 'Đang chạy' : (healthServices.directus.status === 'loading' ? 'Đang đo...' : 'Mất kết nối')"></span>
+            </span>
+          </div>
+
+          <div class="space-y-1.5 pt-1 border-t border-slate-200/60">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-500 font-medium">Độ trễ (Latency):</span>
+              <span
+                :class="getLatencyClass(healthServices.directus)"
+                class="font-black px-2 py-0.5 rounded-md text-2xs border font-mono"
+                x-text="getLatencyText(healthServices.directus)"
+              ></span>
+            </div>
+            <div class="text-2xs text-slate-600 truncate font-mono" :title="healthServices.directus.details || healthServices.directus.error">
+              <span class="text-slate-400">Chi tiết:</span>
+              <span class="font-medium ml-1" x-text="healthServices.directus.details || healthServices.directus.error || 'Chưa có dữ liệu'"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Email OTP Service Card -->
+        <div class="p-4 rounded-2xl border border-slate-200 bg-slate-50/60 hover:bg-white hover:border-[#087b80]/40 hover:shadow-xs transition-all flex flex-col justify-between space-y-3">
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center">
+                <svg class="w-5 h-5 text-purple-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect width="20" height="16" x="2" y="4" rx="2"></rect>
+                  <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="font-extrabold text-sm text-slate-900 leading-tight">Email OTP Service</h3>
+                <p class="text-2xs text-slate-500 font-medium mt-0.5">Microservice (Port 4000)</p>
+              </div>
+            </div>
+
+            <!-- Status Badge -->
+            <span
+              :class="healthServices.emailOtp.status === 'healthy' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : (healthServices.emailOtp.status === 'loading' ? 'bg-slate-100 text-slate-500 border-slate-200' : 'bg-rose-50 text-rose-700 border-rose-200')"
+              class="px-2.5 py-0.5 rounded-full text-2xs font-extrabold border shrink-0 flex items-center gap-1"
+            >
+              <span 
+                :class="healthServices.emailOtp.status === 'healthy' ? 'bg-emerald-500' : (healthServices.emailOtp.status === 'loading' ? 'bg-slate-400' : 'bg-rose-500')"
+                class="w-1.5 h-1.5 rounded-full"
+              ></span>
+              <span x-text="healthServices.emailOtp.status === 'healthy' ? 'Đang chạy' : (healthServices.emailOtp.status === 'loading' ? 'Đang đo...' : 'Mất kết nối')"></span>
+            </span>
+          </div>
+
+          <div class="space-y-1.5 pt-1 border-t border-slate-200/60">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-500 font-medium">Độ trễ (Latency):</span>
+              <span
+                :class="getLatencyClass(healthServices.emailOtp)"
+                class="font-black px-2 py-0.5 rounded-md text-2xs border font-mono"
+                x-text="getLatencyText(healthServices.emailOtp)"
+              ></span>
+            </div>
+            <div class="text-2xs text-slate-600 truncate font-mono" :title="healthServices.emailOtp.details || healthServices.emailOtp.error">
+              <span class="text-slate-400">Chi tiết:</span>
+              <span class="font-medium ml-1" x-text="healthServices.emailOtp.details || healthServices.emailOtp.error || 'Chưa có dữ liệu'"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB SWITCHER -->
+    <div class="flex items-center flex-wrap gap-2 border-b border-brand-border pb-2">
+      <button
+        @click="activeTab = 'company'"
+        :class="activeTab === 'company' ? 'bg-[#0F172A] text-white shadow-xs' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'"
+        class="px-4 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"></path>
+          <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"></path>
+          <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"></path>
+          <path d="M10 6h4"></path>
+          <path d="M10 10h4"></path>
+          <path d="M10 14h4"></path>
+          <path d="M10 18h4"></path>
+        </svg>
+        <span>Thông tin Pháp nhân Công ty</span>
+      </button>
+
+      <button
+        @click="activeTab = 'vnpay'"
+        :class="activeTab === 'vnpay' ? 'bg-[#0F172A] text-white shadow-xs' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'"
+        class="px-4 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect width="20" height="14" x="2" y="5" rx="2"></rect>
+          <line x1="2" x2="22" y1="10" y2="10"></line>
+        </svg>
+        <span>Cấu hình Cổng VNPAY</span>
+      </button>
+
+      <button
+        @click="activeTab = 'smtp'"
+        :class="activeTab === 'smtp' ? 'bg-[#0F172A] text-white shadow-xs' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'"
+        class="px-4 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect width="20" height="16" x="2" y="4" rx="2"></rect>
+          <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+        </svg>
+        <span>Cấu hình SMTP Mail Server</span>
+      </button>
+
+      <button
+        @click="activeTab = 'integrations'"
+        :class="activeTab === 'integrations' ? 'bg-[#0F172A] text-white shadow-xs' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'"
+        class="px-4 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect width="20" height="8" x="2" y="2" rx="2" ry="2"></rect>
+          <rect width="20" height="8" x="2" y="14" rx="2" ry="2"></rect>
+          <line x1="6" x2="6.01" y1="6" y2="6"></line>
+          <line x1="6" x2="6.01" y1="18" y2="18"></line>
+        </svg>
+        <span>Kết nối Directus & OTP</span>
+      </button>
+
+      <button
+        @click="activeTab = 'promotions'"
+        :class="activeTab === 'promotions' ? 'bg-[#0F172A] text-white shadow-xs' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'"
+        class="px-4 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"></path>
+          <path d="M7 7h.01"></path>
+        </svg>
+        <span>Chính Sách Chiết Khấu & Bậc Thang</span>
+      </button>
+
+      <button
+        @click="activeTab = 'security'"
+        :class="activeTab === 'security' ? 'bg-[#0F172A] text-white shadow-xs' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'"
+        class="px-4 py-2.5 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center gap-2"
+      >
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
+        </svg>
+        <span>Bảo Mật & Đổi Mật Khẩu Admin</span>
+      </button>
+    </div>
+
+    <!-- NOTIFICATION MESSAGE -->
+    <div
+      x-show="message"
+      x-transition
+      class="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-xs font-bold shadow-xs flex items-center justify-between"
+    >
+      <span x-text="message"></span>
+      <button @click="message = ''" class="text-emerald-700 hover:text-emerald-900 cursor-pointer">✕</button>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- TAB 1: THÔNG TIN PHÁP NHÂN CÔNG TY (COMPANY LEGAL INFO)                  -->
+    <!-- ========================================================================= -->
+    <div x-show="activeTab === 'company'" class="space-y-6">
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
+          <div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-brand-dark text-brand-accent flex items-center justify-center">
+                <svg class="w-5 h-5 text-brand-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"></path>
+                  <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"></path>
+                  <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"></path>
+                  <path d="M10 6h4"></path>
+                  <path d="M10 10h4"></path>
+                  <path d="M10 14h4"></path>
+                  <path d="M10 18h4"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="text-base font-bold text-slate-900">Hồ Sơ Pháp Nhân & Doanh Nghiệp Công Ty</h3>
+                <p class="text-xs text-slate-500 mt-0.5">Xuất hiện tự động trên Tiêu đề Báo giá A4, Phiếu xuất kho giao hàng và Hóa đơn GTGT</p>
+              </div>
+            </div>
+          </div>
+
+          <button
+            @click="saveCompanyInfo"
+            :disabled="saving"
+            class="px-5 py-2.5 rounded-xl bg-brand-primary hover:bg-brand-dark text-white font-bold text-xs transition-all shadow-xs hover:shadow-md cursor-pointer flex items-center gap-2"
+          >
+            <span x-show="saving" class="animate-spin text-xs">🌀</span>
+            <span>Lưu Thông Tin Pháp Nhân</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="md:col-span-2">
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Tên Đầy Đủ Doanh Nghiệp / Công Ty *</label>
+            <input
+              type="text"
+              x-model="companyInfo.company_name"
+              placeholder="VD: CÔNG TY TNHH THƯƠNG MẠI DỊCH VỤ LA PET"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Mã Số Thuế (MST) *</label>
+            <input
+              type="text"
+              x-model="companyInfo.tax_id"
+              placeholder="0318123456"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Hotline B2B & Hỗ Trợ Đại Lý</label>
+            <input
+              type="text"
+              x-model="companyInfo.hotline"
+              placeholder="0909 203 166"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+
+          <div class="md:col-span-2">
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Địa Chỉ Trụ Sở Chính Đăng Ký Kinh Doanh *</label>
+            <input
+              type="text"
+              x-model="companyInfo.address"
+              placeholder="Số 123 Đường D2, Phường 25, Quận Bình Thạnh, TP. Hồ Chí Minh"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Email Liên Hệ Hiển Thị Công Khai (Footer & Trang Liên Hệ) *
+            </label>
+            <input
+              type="email"
+              x-model="companyInfo.email"
+              placeholder="contact@lapet.vn"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+            <p class="text-[11px] text-slate-500 mt-1">
+              Hiển thị công khai ở Chân trang (Footer), Trang Liên hệ và trên Báo giá cho đối tác đại lý liên hệ.
+            </p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Cổng Thông Tin / Website</label>
+            <input
+              type="text"
+              x-model="companyInfo.website"
+              placeholder="https://lapet.vn"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Người Đại Diện Ký Báo Giá / Hợp Đồng</label>
+            <input
+              type="text"
+              x-model="companyInfo.representative_name"
+              placeholder="Nguyễn Văn Phát"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Chức Vụ Người Ký</label>
+            <input
+              type="text"
+              x-model="companyInfo.representative_title"
+              placeholder="Giám Đốc Điều Hành"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 2: CẤU HÌNH EMAIL QUẢN TRỊ VIÊN NHẬN THÔNG BÁO -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
+          <div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center">
+                <svg class="w-5 h-5 text-amber-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="text-base font-bold text-slate-900">Email Quản Trị Viên Nhận Thông Báo</h3>
+                <p class="text-xs text-slate-500 mt-0.5">
+                  Hòm thư nội bộ nhận thông báo tự động khi có Đại lý đăng ký mới hoặc khi có đơn đặt hàng sỉ
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <button
+            @click="saveNotificationConfig"
+            :disabled="saving"
+            class="px-5 py-2.5 rounded-xl bg-brand-primary hover:bg-brand-dark text-white font-bold text-xs transition-all shadow-xs hover:shadow-md cursor-pointer flex items-center gap-2"
+          >
+            <span x-show="saving" class="animate-spin text-xs">🌀</span>
+            <span>Lưu Cấu Hình Thông Báo</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="md:col-span-2">
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Hòm Thư Admin Nhận Thông Báo (Admin Notification Email) *
+            </label>
+            <input
+              type="email"
+              x-model="notificationConfig.admin_email"
+              placeholder="admin@lapet.vn"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+            <p class="text-[11px] text-slate-500 mt-1">
+              Mỗi khi khách gửi form Đăng ký Đại lý hoặc phát sinh đơn hàng, hệ thống sẽ tự động gửi email thông báo về địa chỉ này.
+            </p>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                x-model="notificationConfig.notify_on_dealer_register"
+                class="w-4 h-4 rounded text-brand-primary focus:ring-brand-primary"
+              />
+              <span class="text-xs font-bold text-slate-700">Gửi email khi có hồ sơ Đại lý mới đăng ký</span>
+            </label>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                x-model="notificationConfig.notify_on_new_order"
+                class="w-4 h-4 rounded text-brand-primary focus:ring-brand-primary"
+              />
+              <span class="text-xs font-bold text-slate-700">Gửi email khi có Đơn hàng sỉ B2B mới</span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- TAB 2: CẤU HÌNH CỔNG THANH TOÁN VNPAY                                    -->
+    <!-- ========================================================================= -->
+    <div x-show="activeTab === 'vnpay'" class="space-y-6">
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
+          <div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-blue-100 text-blue-800 flex items-center justify-center font-black text-xs">
+                VNP
+              </div>
+              <div>
+                <h3 class="text-base font-bold text-slate-900">Cổng Thanh Toán Trực Tuyến VNPAY</h3>
+                <p class="text-xs text-slate-500 mt-0.5">Cấu hình kết nối cổng thanh toán VNPAY (VNPAY-QR, Thẻ ATM/Nội địa, Visa/Mastercard)</p>
+              </div>
+            </div>
+          </div>
+
+          <button
+            @click="saveVnPayConfig"
+            :disabled="saving"
+            class="px-5 py-2.5 rounded-xl bg-brand-primary hover:bg-brand-dark text-white font-bold text-xs transition-all shadow-xs hover:shadow-md cursor-pointer flex items-center gap-2"
+          >
+            <span x-show="saving" class="animate-spin text-xs">🌀</span>
+            <span>Lưu Cấu Hình VNPAY</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <div class="space-y-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">VNPAY URL (Cổng Thanh Toán) *</label>
+              <input
+                type="text"
+                x-model="vnpayConfig.url"
+                placeholder="https://sandbox.vnpayment.vn/paymentv2/vpcpay.html"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+              />
+              <p class="text-[11px] text-slate-400 mt-1">Sandbox: <code>https://sandbox.vnpayment.vn/paymentv2/vpcpay.html</code></p>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Mã Định Danh Website / Merchant Code (TMN Code) *</label>
+              <input
+                type="text"
+                x-model="vnpayConfig.tmn_code"
+                placeholder="BPFUA1FN"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+              />
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Khóa Bí Mật Tạo Chữ Ký (Hash Secret / Checksum) *</label>
+              <input
+                type="password"
+                x-model="vnpayConfig.hash_secret"
+                placeholder="RTPQJQXHOGYLLQWDCXNRHYVKAIXNHOZU"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+              />
+              <p class="text-[11px] text-slate-400 mt-1">Dùng thuật toán HMAC-SHA512 để ký và đối soát giao dịch bảo mật</p>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">VNPAY Return URL (URL Chuyển Hướng Sau Thanh Toán)</label>
+              <input
+                type="text"
+                x-model="vnpayConfig.return_url"
+                placeholder="http://localhost:4321/api/payment/vnpay-callback"
+                class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Note info -->
+        <div class="p-4 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-900 flex items-start gap-3">
+          <svg class="w-5 h-5 text-blue-600 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" x2="12" y1="8" y2="12"></line>
+            <line x1="12" x2="12.01" y1="16" y2="16"></line>
+          </svg>
+          <div class="space-y-1">
+            <p class="font-bold">Cơ chế thanh toán VNPAY B2B tự động:</p>
+            <p class="text-blue-800">Khi đại lý tạo đơn và chọn thanh toán trực tuyến, hệ thống sẽ sinh URL thanh toán có chữ ký HMAC-SHA512. Khi giao dịch thành công, VNPAY gọi webhook (IPN) để hệ thống tự động xác nhận hoàn tất thanh toán và trừ tồn kho nội bộ PostgreSQL mà không cần nhân viên đối soát thủ công.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- TAB 3: CẤU HÌNH SMTP MAIL SERVER (SYSTEM SMTP)                           -->
+    <!-- ========================================================================= -->
+    <div x-show="activeTab === 'smtp'" class="space-y-6">
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-5">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-4">
+          <div>
+            <div class="flex items-center gap-2.5">
+              <div class="w-9 h-9 rounded-xl bg-purple-100 text-purple-800 flex items-center justify-center">
+                <svg class="w-5 h-5 text-purple-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect width="20" height="16" x="2" y="4" rx="2"></rect>
+                  <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="text-base font-bold text-slate-900">Máy Chủ Gửi Email Hệ Thống (SMTP)</h3>
+                <p class="text-xs text-slate-500 mt-0.5">Gửi mã OTP đăng nhập, thông báo duyệt hồ sơ đại lý B2B và biên nhận đơn hàng</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              @click="testSmtp"
+              :disabled="smtpTestLoading"
+              class="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <span x-show="!smtpTestLoading">Kiểm Tra Gửi Mail Thử</span>
+              <span x-show="smtpTestLoading" class="flex items-center gap-1">
+                <span class="animate-spin text-xs">🌀</span> Đang kiểm tra...
+              </span>
+            </button>
+            <button
+              @click="saveSmtpConfig"
+              :disabled="saving"
+              class="px-5 py-2.5 rounded-xl bg-brand-primary hover:bg-brand-dark text-white font-bold text-xs transition-all shadow-xs hover:shadow-md cursor-pointer flex items-center gap-2"
+            >
+              <span x-show="saving" class="animate-spin text-xs">🌀</span>
+              <span>Lưu Cấu Hình SMTP</span>
+            </button>
+          </div>
+        </div>
+
+        <template x-if="smtpTestResult">
+          <div
+            :class="smtpTestResult.success ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-800'"
+            class="p-3.5 rounded-xl border text-xs font-semibold flex items-center justify-between"
+          >
+            <span x-text="smtpTestResult.message || smtpTestResult.error"></span>
+            <button @click="smtpTestResult = null" class="font-bold cursor-pointer">✕</button>
+          </div>
+        </template>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+          <div class="md:col-span-2">
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Máy Chủ SMTP (Host / Server Address) *</label>
+            <input
+              type="text"
+              x-model="smtpConfig.host"
+              placeholder="smtp.gmail.com"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Cổng Kết Nối (Port) *</label>
+            <input
+              type="number"
+              x-model.number="smtpConfig.port"
+              placeholder="587"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+            <p class="text-[11px] text-slate-400 mt-1">Cổng chuẩn: 587 (TLS/STARTTLS) hoặc 465 (SSL)</p>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Tài Khoản Đăng Nhập (SMTP User) *</label>
+            <input
+              type="text"
+              x-model="smtpConfig.user"
+              placeholder="no-reply@lapet.vn hoặc your-email@gmail.com"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Mật Khẩu Ứng Dụng (App Password) *</label>
+            <input
+              type="password"
+              x-model="smtpConfig.password"
+              placeholder="••••••••••••••••"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+
+          <div class="flex items-center gap-2 pt-6">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                x-model="smtpConfig.secure"
+                class="w-4 h-4 rounded text-brand-primary focus:ring-brand-primary"
+              />
+              <span class="text-xs font-bold text-slate-700">Bật chế độ SSL/TLS trực tiếp (Cổng 465)</span>
+            </label>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Tên Hiển Thị Người Gửi (Sender Name)</label>
+            <input
+              type="text"
+              x-model="smtpConfig.sender_name"
+              placeholder="LA PET B2B Notification System"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+
+          <div class="md:col-span-2">
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Địa Chỉ Email Người Gửi (From Email Address)</label>
+            <input
+              type="email"
+              x-model="smtpConfig.sender_email"
+              placeholder="no-reply@lapet.vn"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+            <p class="text-[11px] text-slate-500 mt-1">Cấu hình máy chủ gửi thư tự động lưu trực tiếp trong bảng <code>app_settings</code> của CSDL PostgreSQL. Bấm <b>"Kiểm Tra Gửi Mail Thử"</b> để kiểm tra kết nối SMTP thực tế.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- TAB 4: INTEGRATIONS (DIRECTUS, ROUTER, EMAIL OTP)                         -->
+    <!-- ========================================================================= -->
+    <div x-show="activeTab === 'integrations'" class="space-y-6">
+      <!-- 1. DIRECTUS CMS CONFIG -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <div class="flex items-center gap-2">
+              <svg class="w-5 h-5 text-[#087b80]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+              </svg>
+              <h3 class="text-base font-bold text-slate-900">Cổng Kết Nối Directus Headless CMS</h3>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">Lưu trữ sản phẩm, danh mục, banner, hồ sơ đại lý và bảng cấu hình</p>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              @click="testDirectus"
+              :disabled="testLoading.directus"
+              class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <span x-show="!testLoading.directus">Kiểm tra kết nối</span>
+              <span x-show="testLoading.directus" x-cloak>Đang kiểm tra...</span>
+            </button>
+          </div>
+        </div>
+
+        <template x-if="testStatus.directus">
+          <div 
+            :class="testStatus.directus.success ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-700'"
+            class="p-3 rounded-xl border text-xs font-semibold"
+          >
+            <span x-show="testStatus.directus.success" x-text="'✓ Kết nối Directus thành công! (' + testStatus.directus.user + ')'"></span>
+            <span x-show="!testStatus.directus.success" x-text="'✕ Lỗi kết nối: ' + testStatus.directus.error"></span>
+          </div>
+        </template>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Directus Endpoint URL</label>
+            <input
+              type="text"
+              x-model="integrations.directus.url"
+              placeholder="http://127.0.0.1:8055"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">Directus Admin Static Token</label>
+            <input
+              type="password"
+              x-model="integrations.directus.adminToken"
+              placeholder="lapet_admin_dev_token_2026"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. EMAIL OTP SERVICE -->
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <div class="flex items-center gap-2">
+              <svg class="w-5 h-5 text-purple-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect width="20" height="16" x="2" y="4" rx="2"></rect>
+                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>
+              </svg>
+              <h3 class="text-base font-bold text-slate-900">Email OTP Service</h3>
+            </div>
+            <p class="text-xs text-slate-500 mt-0.5">Microservice độc lập xử lý phát và xác thực mã OTP đăng nhập đại lý qua email</p>
+          </div>
+        </div>
+
+        <div class="space-y-3 p-4 rounded-xl border border-slate-100 bg-slate-50/50">
+          <div class="flex justify-between items-center">
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Email OTP Service URL</label>
+            <button
+              @click="testEmailOtp"
+              :disabled="testLoading.emailOtp"
+              class="px-3 py-1.5 bg-white hover:bg-slate-200 text-slate-700 font-bold text-2xs rounded-lg border border-slate-200 transition-colors cursor-pointer"
+            >
+              <span x-show="!testLoading.emailOtp">Test Email OTP</span>
+              <span x-show="testLoading.emailOtp" x-cloak>Đang test...</span>
+            </button>
+          </div>
+          <input
+            type="text"
+            x-model="integrations.emailOtp.url"
+            placeholder="http://localhost:4000"
+            class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#087b80] bg-white"
+          />
+          <template x-if="testStatus.emailOtp">
+            <div 
+              :class="testStatus.emailOtp.success ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-700'"
+              class="p-2.5 rounded-lg border text-2xs font-semibold"
+            >
+              <span x-show="testStatus.emailOtp.success">✓ Email OTP Service hoạt động bình thường!</span>
+              <span x-show="!testStatus.emailOtp.success" x-text="'✕ ' + testStatus.emailOtp.error"></span>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- SAVE INTEGRATIONS BUTTON -->
+      <div class="flex justify-end">
+        <button
+          @click="saveIntegrations"
+          :disabled="saving"
+          class="px-6 py-3 bg-brand-primary hover:bg-brand-dark text-white font-black text-sm rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-2"
+        >
+          <svg x-show="!saving" class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          <span x-show="!saving">Lưu Toàn Bộ Cấu Hình Kết Nối Vào DB</span>
+          <span x-show="saving" x-cloak>Đang lưu cấu hình...</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- TAB 2: PROMOTIONS & DISCOUNTS -->
+    <!-- ========================================================================= -->
+    <div x-show="activeTab === 'promotions'" class="space-y-6" x-cloak>
+      <!-- SECTION 1: BASE DISCOUNT PERCENT -->
+      <div class="bg-white p-6 rounded-2xl border border-brand-border shadow-xs">
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-brand-sand pb-4 mb-4">
+          <div>
+            <h3 class="text-base font-bold text-brand-dark">1. Chiết khấu cơ bản Đại lý (Base Discount)</h3>
+            <p class="text-xs text-brand-muted mt-0.5">Áp dụng trực tiếp trên Giá lẻ đề xuất (MRP) cho mọi khách hàng đại lý B2B đã duyệt</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <div class="flex items-center gap-1.5">
+              <input
+                type="number"
+                min="0"
+                max="100"
+                x-model="baseDiscount"
+                class="w-24 px-3 py-2 rounded-xl border border-slate-300 font-black text-center text-lg focus:outline-none focus:ring-2 focus:ring-brand-primary"
+              />
+              <span class="font-bold text-slate-600">%</span>
+            </div>
+            <button
+              @click="saveBaseDiscount"
+              :disabled="saving"
+              class="px-5 py-2.5 bg-brand-primary hover:bg-brand-dark text-white text-xs font-bold rounded-xl transition-colors cursor-pointer"
+            >
+              Lưu thay đổi
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SECTION 2: LONGTERM MILESTONES -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-4">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
+          <div>
+            <h3 class="text-base font-bold text-slate-900">2. Chính Sách Thưởng Doanh Số Dài Hạn (Năm & Quý)</h3>
+            <p class="text-xs text-slate-500 mt-0.5">Các mốc tích lũy và tỉ lệ thưởng % tính theo quý và năm hiển thị trên Cổng đại lý (/hoan-tat)</p>
+          </div>
+
+          <button
+            @click="saveLongtermPolicy"
+            :disabled="saving"
+            class="px-5 py-2.5 bg-[#087b80] hover:bg-[#066367] text-white text-xs font-bold rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+          >
+            <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+              <polyline points="17 21 17 13 7 13 7 21"/>
+              <polyline points="7 3 7 8 15 8"/>
+            </svg>
+            <span>Lưu Mốc Thưởng Vào DB</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- Quarter Milestones -->
+          <div class="p-4 rounded-xl border border-slate-100 bg-slate-50/50 space-y-3">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-600">Mốc Thưởng Tích Lũy Theo Quý</h4>
+            <div class="space-y-2">
+              <template x-for="(m, idx) in longtermPolicy.quarterMilestones" :key="idx">
+                <div class="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200 text-xs gap-2">
+                  <div class="flex items-center gap-2 flex-1">
+                    <input
+                      type="text"
+                      x-model="m.label"
+                      class="w-16 font-bold text-slate-700 border-b border-slate-200 text-xs px-1 py-0.5 focus:outline-none focus:border-[#087b80]"
+                    />
+                    <input
+                      type="number"
+                      x-model.number="m.target"
+                      class="w-28 text-slate-600 font-mono text-xs border-b border-slate-200 px-1 py-0.5 focus:outline-none focus:border-[#087b80]"
+                    />
+                    <span class="text-2xs text-slate-400">₫</span>
+                  </div>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <span class="font-bold text-slate-400">+</span>
+                    <input
+                      type="number"
+                      step="0.1"
+                      x-model.number="m.rate"
+                      class="w-14 font-black text-[#087b80] border-b border-slate-200 text-xs text-center px-1 py-0.5 focus:outline-none focus:border-[#087b80]"
+                    />
+                    <span class="font-bold text-[#087b80]">%</span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Year Milestones -->
+          <div class="p-4 rounded-xl border border-slate-100 bg-slate-50/50 space-y-3">
+            <h4 class="text-xs font-bold uppercase tracking-wider text-slate-600">Mốc Thưởng Tích Lũy Theo Năm</h4>
+            <div class="space-y-2">
+              <template x-for="(m, idx) in longtermPolicy.yearMilestones" :key="idx">
+                <div class="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200 text-xs gap-2">
+                  <div class="flex items-center gap-2 flex-1">
+                    <input
+                      type="text"
+                      x-model="m.label"
+                      class="w-16 font-bold text-slate-700 border-b border-slate-200 text-xs px-1 py-0.5 focus:outline-none focus:border-purple-600"
+                    />
+                    <input
+                      type="number"
+                      x-model.number="m.target"
+                      class="w-28 text-slate-600 font-mono text-xs border-b border-slate-200 px-1 py-0.5 focus:outline-none focus:border-purple-600"
+                    />
+                    <span class="text-2xs text-slate-400">₫</span>
+                  </div>
+                  <div class="flex items-center gap-1 shrink-0">
+                    <span class="font-bold text-slate-400">+</span>
+                    <input
+                      type="number"
+                      step="0.1"
+                      x-model.number="m.rate"
+                      class="w-14 font-black text-purple-700 border-b border-slate-200 text-xs text-center px-1 py-0.5 focus:outline-none focus:border-purple-600"
+                    />
+                    <span class="font-bold text-purple-700">%</span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================================================= -->
+    <!-- TAB 6: BẢO MẬT & ĐỔI MẬT KHẨU ADMIN                                      -->
+    <!-- ========================================================================= -->
+    <div x-show="activeTab === 'security'" class="space-y-6" x-cloak>
+      <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6 max-w-2xl">
+        <div class="border-b border-slate-100 pb-4">
+          <h2 class="text-base font-bold text-slate-800 flex items-center gap-2">
+            <svg class="w-5 h-5 text-slate-700 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            <span>Đổi Mật Khẩu Quản Trị Viên (Admin)</span>
+          </h2>
+          <p class="text-xs text-slate-500 mt-1">
+            Mật khẩu mới sẽ được cập nhật trực tiếp vào tài khoản quản trị Directus Auth và có hiệu lực ngay lập tức.
+          </p>
+        </div>
+
+        <form @submit.prevent="changeAdminPassword()" class="space-y-4">
+          <div 
+            x-show="pwdMsg" 
+            x-text="pwdMsg" 
+            :class="pwdErr ? 'bg-rose-50 text-rose-600 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'"
+            class="p-3.5 text-xs font-semibold rounded-xl border"
+          ></div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Mật khẩu hiện tại
+            </label>
+            <input
+              type="password"
+              x-model="adminCurrentPwd"
+              required
+              placeholder="Nhập mật khẩu hiện tại..."
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#087b80]/20 focus:border-[#087b80]"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Mật khẩu mới (tối thiểu 6 ký tự)
+            </label>
+            <input
+              type="password"
+              x-model="adminNewPwd"
+              required
+              minlength="6"
+              placeholder="Nhập mật khẩu mới..."
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#087b80]/20 focus:border-[#087b80]"
+            />
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+              Xác nhận mật khẩu mới
+            </label>
+            <input
+              type="password"
+              x-model="adminConfirmPwd"
+              required
+              minlength="6"
+              placeholder="Nhập lại mật khẩu mới..."
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#087b80]/20 focus:border-[#087b80]"
+            />
+          </div>
+
+          <div class="pt-3 border-t border-slate-100 flex items-center justify-between">
+            <span class="text-xs text-slate-400">Yêu cầu bảo mật: mật khẩu nên có chữ hoa, số hoặc ký tự đặc biệt.</span>
+            <button
+              type="submit"
+              :disabled="pwdSubmitting"
+              class="px-6 py-2.5 bg-[#0F172A] hover:bg-slate-800 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer disabled:opacity-50 flex items-center gap-2"
+            >
+              <span x-show="pwdSubmitting" class="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin inline-block"></span>
+              <span x-text="pwdSubmitting ? 'ĐANG LƯU...' : 'LƯU MẬT KHẨU MỚI'"></span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</AdminLayout>

@@ -1,6 +1,7 @@
 // src/pages/api/auth/verify-otp.ts
 import type { APIRoute } from 'astro';
 import { customerService } from '@/services/customer.service';
+import { createAuthToken, AUTH_COOKIE_NAME } from '@/lib/auth';
 
 export const prerender = false;
 
@@ -30,7 +31,7 @@ export const POST: APIRoute = async ({ request, session, cookies }) => {
 
     if (!partner.email) {
       return new Response(
-        JSON.stringify({ error: 'Tài khoản chưa cập nhật Email trên Odoo. Vui lòng liên hệ Hotline.' }),
+        JSON.stringify({ error: 'Tài khoản chưa cập nhật Email trên hệ thống B2B LA PET. Vui lòng liên hệ Hotline.' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
@@ -111,6 +112,21 @@ export const POST: APIRoute = async ({ request, session, cookies }) => {
     }
 
     // 8. Thiết lập Browser Cookies
+    // 8.1. Cookie định danh có chữ ký số bí mật (Bảo mật tối cao cho Server-side Auth)
+    const authToken = createAuthToken({
+      partnerId: partner.id,
+      partnerName: partner.name || null,
+      partnerPhone: partner.phone || partner.mobile || null,
+    });
+    cookies.set(AUTH_COOKIE_NAME, authToken, {
+      path: '/',
+      httpOnly: true,
+      secure: import.meta.env.PROD,
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7,
+    });
+
+    // 8.2. Cookies hỗ trợ hiển thị UI phía Client (Alpine.js)
     cookies.set('partner_id', String(partner.id), cookieOptions);
     cookies.set('partner_name', String(partner.name || ''), cookieOptions);
     cookies.set('partner_phone', String(partner.phone || partner.mobile || ''), cookieOptions);

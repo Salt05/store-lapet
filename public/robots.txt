@@ -1,0 +1,14 @@
+# robots.txt for LA PET B2B Pet Store (https://store.lapet.vn)
+User-agent: *
+Allow: /
+
+# Disallow private, administrative and transactional routes
+Disallow: /api/
+Disallow: /tai-khoan/
+Disallow: /hoan-tat
+Disallow: /auth/
+Disallow: /dai-ly/
+Disallow: /unsubscribe
+
+# Sitemap location
+Sitemap: https://store.lapet.vn/sitemap.xml

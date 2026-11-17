@@ -27,3 +27,17 @@ pnpm-debug.log*
 .idea/
 .vscode/
 Thumbs.db
+
+# codegraph & knowledge graphs
+.codegraph/
+graphify-out/
+
+# Internal planning, audit & scratch documents (local only)
+ROADMAP_AND_TECH_PLAN.md
+SYSTEM_AUDIT_REPORT.md
+init-local-directus.mjs
+clone-directus.mjs
+docx_summary.txt
+vnpay_test_card.md
+scripts/docx_updater.py
+

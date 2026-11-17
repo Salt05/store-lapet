@@ -1,0 +1,489 @@
+---
+// src/pages/admin/don-hang/index.astro
+import AdminLayout from '@/layouts/AdminLayout.astro';
+import { query } from '@/lib/db';
+import { 
+  ORDER_STATUS, 
+  PAYMENT_STATUS, 
+  ORDER_STATUS_LABEL, 
+  PAYMENT_STATUS_LABEL 
+} from '@/config/order-constants';
+
+export const prerender = false;
+
+const url = new URL(Astro.request.url);
+const currentSearch = (url.searchParams.get('q') || '').trim();
+const currentStatus = url.searchParams.get('status') || url.searchParams.get('state') || 'all';
+const dateFrom = url.searchParams.get('date_from') || '';
+const dateTo = url.searchParams.get('date_to') || '';
+const paymentStatus = url.searchParams.get('payment_status') || 'all';
+const currentPage = Math.max(1, Number(url.searchParams.get('page') || 1));
+const pageSize = 20;
+const offset = (currentPage - 1) * pageSize;
+
+let orders: any[] = [];
+let draftCount = 0;
+let totalMatchingOrders = 0;
+let totalPages = 1;
+let loadError = '';
+
+try {
+  let countSql = `SELECT COUNT(*) as total FROM orders o WHERE 1=1`;
+  let dataSql = `
+    SELECT 
+      o.id,
+      o.order_code,
+      o.client_order_ref,
+      COALESCE(o.partner_name, c.name, 'Đại lý B2B') as customer,
+      COALESCE(o.partner_phone, c.phone, '') as customer_phone,
+      TO_CHAR(COALESCE(o.date_order, o.created_at), 'YYYY-MM-DD') as date,
+      o.amount_total as total,
+      COALESCE(o.paid_amount, 0) as paid_amount,
+      o.status,
+      o.payment_status,
+      o.notes as note
+    FROM orders o
+    LEFT JOIN customers c ON o.customer_id = c.id
+    WHERE 1=1
+  `;
+  const filterParams: any[] = [];
+
+  if (currentStatus && currentStatus !== 'all') {
+    filterParams.push(currentStatus);
+    countSql += ` AND o.status = $${filterParams.length}`;
+    dataSql += ` AND o.status = $${filterParams.length}`;
+  }
+
+  if (dateFrom) {
+    filterParams.push(`${dateFrom} 00:00:00`);
+    countSql += ` AND COALESCE(o.date_order, o.created_at) >= $${filterParams.length}`;
+    dataSql += ` AND COALESCE(o.date_order, o.created_at) >= $${filterParams.length}`;
+  }
+  if (dateTo) {
+    filterParams.push(`${dateTo} 23:59:59`);
+    countSql += ` AND COALESCE(o.date_order, o.created_at) <= $${filterParams.length}`;
+    dataSql += ` AND COALESCE(o.date_order, o.created_at) <= $${filterParams.length}`;
+  }
+
+  if (paymentStatus && paymentStatus !== 'all') {
+    filterParams.push(paymentStatus);
+    countSql += ` AND o.payment_status = $${filterParams.length}`;
+    dataSql += ` AND o.payment_status = $${filterParams.length}`;
+  }
+
+  if (currentSearch) {
+    filterParams.push(`%${currentSearch}%`);
+    const sIdx = filterParams.length;
+    const searchCond = `(
+      o.order_code ILIKE $${sIdx} 
+      OR o.client_order_ref ILIKE $${sIdx} 
+      OR o.partner_name ILIKE $${sIdx} 
+      OR o.partner_phone ILIKE $${sIdx} 
+      OR c.name ILIKE $${sIdx} 
+      OR c.phone ILIKE $${sIdx}
+    )`;
+    countSql += ` AND ${searchCond}`;
+    dataSql += ` AND ${searchCond}`;
+  }
+
+  const [totalRes, draftRes] = await Promise.all([
+    query(countSql, filterParams),
+    query(`SELECT COUNT(*) as count FROM orders WHERE status = 'draft';`),
+  ]);
+
+  totalMatchingOrders = Number(totalRes.rows[0]?.total || 0);
+  draftCount = Number(draftRes.rows[0]?.count || 0);
+
+  if (totalMatchingOrders > 0) {
+    const pageParams = [...filterParams, pageSize, offset];
+    dataSql += ` 
+      ORDER BY COALESCE(o.date_order, o.created_at) DESC, o.id DESC 
+      LIMIT $${pageParams.length - 1} OFFSET $${pageParams.length};
+    `;
+    const rowsRes = await query(dataSql, pageParams);
+    orders = rowsRes.rows.map((o) => ({
+      id: o.id,
+      name: o.order_code,
+      order_code: o.order_code,
+      ref: o.client_order_ref || '',
+      customer: o.customer,
+      customerPhone: o.customer_phone,
+      date: o.date,
+      total: Number(o.total || 0),
+      paid_amount: Number(o.paid_amount || 0),
+      remaining_amount: Math.max(0, Number(o.total || 0) - Number(o.paid_amount || 0)),
+      status: o.status || 'draft',
+      payment_status: o.payment_status || 'unpaid',
+      status_label: ORDER_STATUS_LABEL[o.status] || { label: o.status, color: '' },
+      payment_label: PAYMENT_STATUS_LABEL[o.payment_status] || { label: o.payment_status, color: '' },
+      note: o.note || '',
+    }));
+    totalPages = Math.max(1, Math.ceil(totalMatchingOrders / pageSize));
+  }
+} catch (pgError: any) {
+  loadError = pgError?.message || 'Lỗi đọc dữ liệu đơn hàng từ cơ sở dữ liệu';
+}
+
+const tabs = [
+  { id: 'all', label: 'Tất cả' },
+  { id: 'draft', label: 'Đơn nháp', count: draftCount },
+  { id: 'confirmed', label: 'Đơn bán hàng' },
+  { id: 'delivered', label: 'Đã giao' },
+  { id: 'completed', label: 'Hoàn tất' },
+  { id: 'cancelled', label: 'Đã hủy' },
+];
+
+const exportExcelUrl = `/api/admin/orders/export-excel?state=${encodeURIComponent(currentStatus)}&q=${encodeURIComponent(currentSearch)}`;
+---
+
+<AdminLayout title="Quản lý Đơn hàng B2B Đại lý" activeNav="orders">
+  <div 
+    class="space-y-6"
+    x-data={`{
+      exportLoading: false,
+      async exportOrdersExcel() {
+        this.exportLoading = true;
+        try {
+          const res = await fetch('${exportExcelUrl}');
+          const blob = await res.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'Bao_Cao_Don_Hang_LA_PET_${new Date().toISOString().slice(0, 10)}.csv';
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+        } catch {
+          alert('Không thể xuất file báo cáo đơn hàng');
+        } finally {
+          this.exportLoading = false;
+        }
+      }
+    }`}
+  >
+    <!-- TOP HEADER -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div>
+        <h1 class="text-xl sm:text-2xl font-black text-brand-dark tracking-tight">Danh sách Đơn hàng B2B</h1>
+        <p class="text-xs text-brand-muted mt-1">
+          Quản lý tiến độ đơn hàng đại lý & theo dõi thanh toán công nợ trên cơ sở dữ liệu PostgreSQL
+        </p>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button
+          @click="exportOrdersExcel"
+          :disabled="exportLoading"
+          class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-2xs cursor-pointer"
+        >
+          <svg x-show="!exportLoading" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span x-show="!exportLoading">Xuất File Excel</span>
+          <span x-show="exportLoading">Đang xuất...</span>
+        </button>
+
+        <a
+          href="/admin/don-hang"
+          class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-brand-primary hover:bg-brand-dark text-white text-xs font-bold transition-all shadow-xs"
+        >
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+            <path d="M21 3v5h-5"></path>
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+            <path d="M8 16H3v5"></path>
+          </svg>
+          <span>Làm mới</span>
+        </a>
+      </div>
+    </div>
+
+    <!-- STATE TABS WITH DRAFT BADGE -->
+    <div class="bg-white p-2 rounded-2xl border border-brand-border shadow-xs flex items-center gap-2 overflow-x-auto">
+      {tabs.map((tab) => {
+        const isAct = currentStatus === tab.id;
+        const qParams = new URLSearchParams();
+        if (tab.id !== 'all') qParams.set('status', tab.id);
+        if (currentSearch) qParams.set('q', currentSearch);
+        if (dateFrom) qParams.set('date_from', dateFrom);
+        if (dateTo) qParams.set('date_to', dateTo);
+        if (paymentStatus && paymentStatus !== 'all') qParams.set('payment_status', paymentStatus);
+
+        const href = `/admin/don-hang${qParams.toString() ? `?${qParams.toString()}` : ''}`;
+
+        return (
+          <a
+            href={href}
+            class={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+              isAct
+                ? 'bg-brand-dark text-white shadow-xs'
+                : 'text-brand-muted hover:text-brand-dark hover:bg-brand-sand'
+            }`}
+          >
+            <span>{tab.label}</span>
+            {tab.id === 'draft' && tab.count !== undefined && tab.count > 0 && (
+              <span
+                class={`px-2 py-0.5 rounded-full text-[10px] font-black leading-none ${
+                  isAct ? 'bg-rose-500 text-white' : 'bg-rose-100 text-rose-700 border border-rose-200'
+                }`}
+                title={`${tab.count} đơn nháp chờ chốt`}
+              >
+                {tab.count}
+              </span>
+            )}
+          </a>
+        );
+      })}
+    </div>
+
+    <!-- MULTI-CRITERIA FILTER BAR -->
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+      <form method="GET" class="space-y-4">
+        <input type="hidden" name="status" value={currentStatus} />
+
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+          <!-- SEARCH FIELD -->
+          <div class="md:col-span-5">
+            <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+              Tìm kiếm đơn hàng
+            </label>
+            <div class="relative">
+              <input
+                type="text"
+                name="q"
+                value={currentSearch}
+                placeholder="Tìm mã ORD-xxx, tên khách, số điện thoại..."
+                class="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80] focus:border-[#087b80] bg-white"
+              />
+              <span class="absolute left-3 top-2.5 text-slate-400">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+              </span>
+            </div>
+          </div>
+
+          <!-- DATE FROM -->
+          <div class="md:col-span-2">
+            <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+              Từ ngày
+            </label>
+            <input
+              type="date"
+              name="date_from"
+              value={dateFrom}
+              class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80] bg-white"
+            />
+          </div>
+
+          <!-- DATE TO -->
+          <div class="md:col-span-2">
+            <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+              Đến ngày
+            </label>
+            <input
+              type="date"
+              name="date_to"
+              value={dateTo}
+              class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80] bg-white"
+            />
+          </div>
+
+          <!-- PAYMENT STATUS -->
+          <div class="md:col-span-2">
+            <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+              Thanh toán
+            </label>
+            <select
+              name="payment_status"
+              class="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80] bg-white"
+            >
+              <option value="all" selected={paymentStatus === 'all'}>Tất cả thanh toán</option>
+              <option value="unpaid" selected={paymentStatus === 'unpaid'}>Chưa thanh toán</option>
+              <option value="partial" selected={paymentStatus === 'partial'}>Thanh toán 1 phần</option>
+              <option value="paid" selected={paymentStatus === 'paid'}>Đã thanh toán đủ</option>
+            </select>
+          </div>
+
+          <!-- SUBMIT / RESET BUTTONS -->
+          <div class="md:col-span-1 flex items-center gap-1">
+            <button
+              type="submit"
+              class="w-full bg-[#087b80] hover:bg-[#066367] text-white py-2 px-3 rounded-xl text-xs font-bold transition-colors cursor-pointer text-center"
+              title="Áp dụng bộ lọc"
+            >
+              Lọc
+            </button>
+            {(currentSearch || dateFrom || dateTo || (paymentStatus && paymentStatus !== 'all')) && (
+              <a
+                href={`/admin/don-hang${currentStatus !== 'all' ? `?status=${currentStatus}` : ''}`}
+                class="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition-colors"
+                title="Xóa bộ lọc"
+              >
+                ✕
+              </a>
+            )}
+          </div>
+        </div>
+      </form>
+    </div>
+
+    {loadError && (
+      <div class="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700 text-xs font-semibold flex items-center gap-2">
+        <svg class="w-4 h-4 shrink-0 text-red-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        <span>{loadError}</span>
+      </div>
+    )}
+
+    <!-- ORDERS DATA TABLE -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-slate-600">
+          <thead class="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100">
+            <tr>
+              <th class="py-3.5 px-4">Mã đơn hàng</th>
+              <th class="py-3.5 px-4">Khách hàng / Đại lý</th>
+              <th class="py-3.5 px-4">Ngày đặt</th>
+              <th class="py-3.5 px-4 text-center">Thanh toán</th>
+              <th class="py-3.5 px-4 text-right">Tổng tiền / Đã trả</th>
+              <th class="py-3.5 px-4 text-center">Trạng thái</th>
+              <th class="py-3.5 px-4 text-right">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {orders.length === 0 ? (
+              <tr>
+                <td colspan="7" class="py-12 text-center text-slate-400">
+                  <div class="flex flex-col items-center justify-center gap-2">
+                    <svg class="w-10 h-10 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+                      <path d="M3 9h18"></path>
+                      <path d="m9 16 3-3 3 3"></path>
+                    </svg>
+                    <span class="font-medium text-sm">Không tìm thấy đơn hàng nào phù hợp với bộ lọc hiện tại.</span>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              orders.map((ord) => {
+                const statusMeta = ord.status_label || { label: ord.status, color: 'bg-slate-100 text-slate-700 border-slate-200' };
+                const paymentMeta = ord.payment_label || { label: ord.payment_status, color: 'bg-slate-100 text-slate-700 border-slate-200' };
+
+                return (
+                  <tr class="hover:bg-slate-50/80 transition-colors">
+                    <td class="py-3.5 px-4 font-bold text-slate-900">
+                      <div class="font-mono text-slate-900 font-bold">{ord.name}</div>
+                      {ord.ref && ord.ref !== ord.name && (
+                        <div class="text-[11px] text-[#087b80] font-mono mt-0.5">
+                          {ord.ref}
+                        </div>
+                      )}
+                    </td>
+                    <td class="py-3.5 px-4">
+                      <div class="font-semibold text-slate-800">{ord.customer}</div>
+                      {ord.customerPhone && (
+                        <div class="text-xs text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                          <span>{ord.customerPhone}</span>
+                        </div>
+                      )}
+                    </td>
+                    <td class="py-3.5 px-4 text-xs text-slate-500 whitespace-nowrap font-mono">
+                      {ord.date}
+                    </td>
+                    <td class="py-3.5 px-4 text-center">
+                      <span
+                        class={`inline-block px-2.5 py-0.5 rounded-full text-[11px] font-extrabold border ${paymentMeta.color}`}
+                      >
+                        {paymentMeta.label}
+                      </span>
+                    </td>
+                    <td class="py-3.5 px-4 text-right whitespace-nowrap">
+                      <div class="font-black text-slate-900">
+                        {new Intl.NumberFormat('vi-VN').format(ord.total)} ₫
+                      </div>
+                      {ord.paid_amount > 0 && ord.paid_amount < ord.total ? (
+                        <div class="text-[11px] text-amber-700 font-bold mt-0.5">
+                          Đã trả: {new Intl.NumberFormat('vi-VN').format(ord.paid_amount)} ₫
+                        </div>
+                      ) : null}
+                    </td>
+                    <td class="py-3.5 px-4 text-center">
+                      <span
+                        class={`inline-block px-2.5 py-1 rounded-full text-xs font-bold border ${statusMeta.color}`}
+                      >
+                        {statusMeta.label}
+                      </span>
+                    </td>
+                    <td class="py-3.5 px-4 text-right whitespace-nowrap">
+                      <a
+                        href={`/admin/don-hang/${ord.id}`}
+                        class="text-xs font-bold text-[#087b80] hover:text-[#066367] hover:bg-teal-50 px-3 py-1.5 rounded-lg border border-teal-200 transition-colors inline-block"
+                      >
+                        Chi tiết →
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- PAGINATION FOOTER -->
+      {(() => {
+        const buildPageHref = (targetPage: number) => {
+          const p = new URLSearchParams();
+          if (currentStatus !== 'all') p.set('status', currentStatus);
+          if (currentSearch) p.set('q', currentSearch);
+          if (dateFrom) p.set('date_from', dateFrom);
+          if (dateTo) p.set('date_to', dateTo);
+          if (paymentStatus && paymentStatus !== 'all') p.set('payment_status', paymentStatus);
+          p.set('page', String(targetPage));
+          return `/admin/don-hang?${p.toString()}`;
+        };
+        return (
+          <div class="px-4 py-3 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
+            <span class="text-slate-500">
+              Hiển thị <strong>{orders.length}</strong> / <strong>{totalMatchingOrders}</strong> đơn hàng — Trang <strong>{currentPage}</strong> / <strong>{totalPages}</strong>
+            </span>
+            <div class="flex items-center gap-2">
+              {currentPage > 1 ? (
+                <a
+                  href={buildPageHref(currentPage - 1)}
+                  class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-100"
+                >
+                  ← Trang trước
+                </a>
+              ) : (
+                <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-bold text-slate-400 opacity-50 cursor-not-allowed">
+                  ← Trang trước
+                </span>
+              )}
+
+              {currentPage < totalPages ? (
+                <a
+                  href={buildPageHref(currentPage + 1)}
+                  class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-bold text-slate-700 hover:bg-slate-100"
+                >
+                  Trang sau →
+                </a>
+              ) : (
+                <span class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white font-bold text-slate-400 opacity-50 cursor-not-allowed">
+                  Trang sau →
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  </div>
+</AdminLayout>

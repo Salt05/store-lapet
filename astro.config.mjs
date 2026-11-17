@@ -8,6 +8,15 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   output: 'server',
 
+  server: {
+    host: true,
+    port: 4321,
+  },
+
+  devToolbar: {
+    enabled: false
+  },
+
   adapter: node({
     mode: 'standalone'
   }),

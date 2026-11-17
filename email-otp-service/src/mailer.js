@@ -1,28 +1,54 @@
 const nodemailer = require('nodemailer');
 const config = require('./config');
+const { getSetting, clearSettingsCache } = require('./db');
 
 class MailerService {
   constructor() {
     this.transporter = null;
-    this.initTransporter();
+    this.currentSmtp = null;
   }
 
-  initTransporter() {
-    const { host, port, user, pass } = config.smtp;
+  async getTransporter(forceRefresh = false) {
+    if (forceRefresh) {
+      this.transporter = null;
+      this.currentSmtp = null;
+      clearSettingsCache();
+    }
 
-    if (user && pass) {
+    const smtpConfig = await getSetting('smtp_config', forceRefresh);
+    if (!smtpConfig || !smtpConfig.user || !smtpConfig.password) {
+      this.transporter = null;
+      this.currentSmtp = null;
+      return null;
+    }
+
+    const host = smtpConfig.host || 'smtp.gmail.com';
+    const port = parseInt(smtpConfig.port || '587', 10);
+    const user = smtpConfig.user.trim();
+    const pass = (smtpConfig.password || '').replace(/\s+/g, '');
+    const secure = Boolean(smtpConfig.secure || port === 465);
+
+    // Kiểm tra xem cấu hình có thay đổi không
+    const configSig = `${host}:${port}:${user}:${pass}:${secure}`;
+    if (this.transporter && this.currentSmtp === configSig) {
+      return this.transporter;
+    }
+
+    try {
       this.transporter = nodemailer.createTransport({
         host,
         port,
-        secure: port === 465,
+        secure,
         auth: { user, pass },
-        tls: { rejectUnauthorized: false },
+        tls: { rejectUnauthorized: process.env.NODE_ENV === 'production' },
       });
-      console.log(`[Mailer] ✅ SMTP đã cấu hình sẵn sàng (${user} qua ${host}:${port})`);
-    } else {
-      console.log(
-        '[Mailer] ⚠️  Chưa cấu hình SMTP_USER và SMTP_PASS trong .env -> Đang chạy ở chế độ MÔ PHỎNG (Mã OTP sẽ được in trực tiếp ra màn hình Terminal).',
-      );
+      this.currentSmtp = configSig;
+      console.log(`[Mailer] ✅ SMTP đã khởi tạo từ CSDL app_settings (${user} qua ${host}:${port})`);
+      return this.transporter;
+    } catch (err) {
+      console.error('[Mailer] ❌ Lỗi tạo SMTP transporter:', err.message);
+      this.transporter = null;
+      return null;
     }
   }
 
@@ -92,17 +118,24 @@ class MailerService {
     const html = this.generateHtmlTemplate(otpCode, expiryMinutes);
     const text = `Mã xác thực OTP của bạn là: ${otpCode}. Mã có hiệu lực trong vòng ${expiryMinutes} phút. Vui lòng không chia sẻ mã này cho bất kỳ ai.`;
 
-    if (!this.transporter) {
+    const transporter = await this.getTransporter();
+    const smtpConfig = await getSetting('smtp_config');
+
+    if (!transporter) {
       console.log('---------------------------------------------------------');
-      console.log(`[MÔ PHỎNG GỬI MAIL] Đến: ${email}`);
+      console.log(`[MÔ PHỎNG GỬI MAIL OTP - Chưa cấu hình SMTP trong CSDL] Đến: ${email}`);
       console.log(`👉 MÃ OTP 6 SỐ: [ ${otpCode} ] (Hết hạn sau ${expiryMinutes} phút)`);
       console.log('---------------------------------------------------------');
       return { success: true, simulated: true };
     }
 
     try {
-      const info = await this.transporter.sendMail({
-        from: config.smtp.from,
+      const senderName = smtpConfig?.sender_name || 'Hệ Thống Xác Thực LA PET';
+      const senderEmail = smtpConfig?.sender_email || smtpConfig?.user;
+      const from = `"${senderName}" <${senderEmail}>`;
+
+      const info = await transporter.sendMail({
+        from,
         to: email,
         subject,
         html,

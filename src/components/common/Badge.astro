@@ -1,0 +1,67 @@
+---
+// src/components/common/Badge.astro
+export interface Props {
+  variant?: 'brand' | 'accent' | 'success' | 'warning' | 'danger' | 'gold' | 'neutral';
+  size?: 'sm' | 'md' | 'lg';
+  pill?: boolean;
+  dot?: boolean;
+  class?: string;
+  id?: string;
+  [key: string]: any;
+}
+
+const {
+  variant = 'brand',
+  size = 'md',
+  pill = false,
+  dot = false,
+  class: className = '',
+  id,
+  ...rest
+} = Astro.props;
+
+const baseStyles = 'inline-flex items-center gap-1.5 leading-none select-none transition-colors';
+
+const variantStyles: Record<string, string> = {
+  brand: 'bg-brand-primary/10 text-brand-primary border border-brand-primary/20 font-bold',
+  accent: 'bg-brand-accent/20 text-brand-dark border border-brand-accent/40 font-bold',
+  success: 'bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold',
+  warning: 'bg-amber-50 text-amber-800 border border-amber-200 font-semibold',
+  danger: 'bg-rose-50 text-rose-700 border border-rose-200 font-semibold',
+  gold: 'bg-[#FEF7ED] text-[#B45309] border border-[#FCD34D] font-extrabold',
+  neutral: 'bg-brand-sand text-brand-muted border border-brand-border font-medium',
+};
+
+const dotColors: Record<string, string> = {
+  brand: 'bg-brand-primary',
+  accent: 'bg-brand-accent',
+  success: 'bg-emerald-500',
+  warning: 'bg-amber-500',
+  danger: 'bg-rose-500',
+  gold: 'bg-amber-500',
+  neutral: 'bg-slate-400',
+};
+
+const sizeStyles: Record<string, string> = {
+  sm: 'text-[10px] px-1.5 py-0.5',
+  md: 'text-xs px-2.5 py-1',
+  lg: 'text-sm px-3 py-1.5',
+};
+
+const radiusStyle = pill ? 'rounded-full' : (size === 'sm' ? 'rounded-sm' : 'rounded-md');
+
+const combinedClasses = [
+  baseStyles,
+  variantStyles[variant] || variantStyles.brand,
+  sizeStyles[size] || sizeStyles.md,
+  radiusStyle,
+  className
+].filter(Boolean).join(' ');
+---
+
+<span class={combinedClasses} id={id} {...rest}>
+  {dot && (
+    <span class={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColors[variant] || 'bg-brand-primary'}`} aria-hidden="true"></span>
+  )}
+  <slot />
+</span>

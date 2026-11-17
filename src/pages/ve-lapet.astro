@@ -1,0 +1,179 @@
+---
+// src/pages/ve-lapet.astro
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Button from '../components/common/Button.astro';
+import Badge from '../components/common/Badge.astro';
+
+const pageTitle = "Về LA PET - Câu Chuyện Thương Hiệu & Sứ Mệnh Dinh Dưỡng Thú Cưng";
+const pageDescription = "Tìm hiểu hành trình phát triển của LA PET - Thương hiệu dinh dưỡng và chăm sóc thú cưng cao cấp hàng đầu Việt Nam. Cam kết an toàn, chất lượng và đồng hành cùng hệ thống đại lý.";
+
+const stats = [
+  { value: '500+', label: 'Đại lý & Pet Shop tin dùng' },
+  { value: '100%', label: 'Nguyên liệu đạt chuẩn kiểm định' },
+  { value: '25+', label: 'Dòng sản phẩm chuyên biệt' },
+  { value: '24/7', label: 'Hệ thống đặt hàng B2B thuận tiện' },
+];
+
+const pillars = [
+  {
+    iconPath: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+    title: 'Dinh Dưỡng Thuần Khiết',
+    desc: 'Công thức cân bằng dinh dưỡng, giàu protein dễ tiêu hóa, bổ sung vitamin & khoáng chất thiết yếu cho sự phát triển khỏe mạnh của thú cưng.',
+  },
+  {
+    iconPath: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
+    title: 'Tiêu Chuẩn Sản Xuất Khắt Khe',
+    desc: 'Quy trình sản xuất tự động khép kín theo tiêu chuẩn an toàn thực phẩm quốc tế, không phẩm màu nhân tạo hay chất bảo quản độc hại.',
+  },
+  {
+    iconPath: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z',
+    title: 'Đồng Hành Cùng Đại Lý',
+    desc: 'Chính sách chiết khấu lũy tiến cạnh tranh, hỗ trợ tư liệu truyền thông, bảo chứng chất lượng và nguồn cung ổn định toàn quốc.',
+  },
+];
+---
+
+<BaseLayout title={pageTitle} description={pageDescription}>
+  
+  <!-- HERO BANNER SECTION -->
+  <section class="relative bg-brand-surface py-12 sm:py-20 border-b border-brand-border/70 overflow-hidden">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
+      <Badge variant="brand" pill class="mb-4">
+        Câu Chuyện Thương Hiệu LA PET
+      </Badge>
+      <h1 class="text-3xl sm:text-5xl lg:text-6xl font-black text-brand-dark tracking-tight leading-tight max-w-4xl mx-auto">
+        Nuôi Dưỡng Tình Yêu Thú Cưng Bằng <span class="text-brand-primary">Dinh Dưỡng Chuẩn Khoa Học</span>
+      </h1>
+      <p class="mt-4 sm:mt-6 text-sm sm:text-lg text-brand-muted max-w-2xl mx-auto leading-relaxed">
+        LA PET ra đời với khát vọng mang đến cho cộng đồng thú cưng tại Việt Nam những sản phẩm bánh thưởng, thức ăn và phụ kiện vệ sinh đạt chất lượng quốc tế, an tâm trong từng bữa ăn.
+      </p>
+      
+      <div class="mt-8 flex flex-wrap justify-center gap-3 sm:gap-4">
+        <Button href="/san-pham" variant="primary" size="lg">
+          Khám phá sản phẩm
+        </Button>
+        <Button href="/lien-he#partner-registration" variant="secondary" size="lg">
+          Trở thành đối tác B2B
+        </Button>
+      </div>
+    </div>
+  </section>
+
+  <!-- KEY STATS BAR -->
+  <section class="bg-white border-b border-brand-border/70 py-8">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-6 text-center">
+        {stats.map((item) => (
+          <div class="p-4 rounded-xl bg-brand-surface/60 border border-brand-border/40">
+            <p class="text-2xl sm:text-4xl font-black text-brand-primary">{item.value}</p>
+            <p class="text-xs sm:text-sm font-semibold text-brand-muted mt-1">{item.label}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- VỀ CHÚNG TÔI / GIỚI THIỆU SECTION (#gioi-thieu) -->
+  <section id="gioi-thieu" class="py-12 sm:py-20 bg-brand-surface">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-14 items-center">
+        <div class="space-y-5">
+          <Badge variant="accent" pill>Giới Thiệu</Badge>
+          <h2 class="text-2xl sm:text-4xl font-black text-brand-dark tracking-tight leading-snug">
+            Khởi Nguồn Từ Tình Yêu &amp; Trách Nhiệm Với Thú Cưng
+          </h2>
+          <p class="text-sm sm:text-base text-brand-text leading-relaxed">
+            Chúng tôi hiểu rằng mỗi chú chó, bé mèo không chỉ là vật nuôi mà là thành viên thân thương trong gia đình. Vì vậy, mọi sản phẩm gắn nhãn LA PET đều trải qua quá trình nghiên cứu kỹ lưỡng về khẩu vị, thói quen và nhu cầu dinh dưỡng đặc thù của thú cưng tại khí hậu nhiệt đới.
+          </p>
+          <p class="text-sm sm:text-base text-brand-muted leading-relaxed">
+            Từ dòng bánh thưởng sấy giòn tự nhiên, que gặm sạch răng đến các giải pháp chăm sóc tã lót và cát vệ sinh kháng khuẩn, LA PET luôn đặt tiêu chí an toàn và nguồn gốc minh bạch lên hàng đầu.
+          </p>
+          <div class="pt-2">
+            <Button href="/san-pham" variant="outline">
+              Xem toàn bộ danh mục sản phẩm &rarr;
+            </Button>
+          </div>
+        </div>
+
+        <div class="rounded-2xl overflow-hidden border border-brand-border shadow-card bg-white p-6 sm:p-8">
+          <h3 class="text-lg sm:text-xl font-bold text-brand-dark mb-4 flex items-center gap-2">
+            <span class="text-brand-primary text-xl">✦</span> Cam Kết Chất Lượng Vượt Trội
+          </h3>
+          <ul class="space-y-4 text-xs sm:text-sm text-brand-text">
+            <li class="flex items-start gap-3">
+              <span class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">✓</span>
+              <span><strong>100% Thịt Thật &amp; Nguyên Liệu Tự Nhiên:</strong> Không sử dụng phụ phẩm kém chất lượng hay chất độn tinh bột dư thừa.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">✓</span>
+              <span><strong>Kiểm Soát Từng Lô Sản Xuất:</strong> Đầy đủ phiếu kiểm nghiệm vi sinh, kim loại nặng và dinh dưỡng trước khi lưu hành.</span>
+            </li>
+            <li class="flex items-start gap-3">
+              <span class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">✓</span>
+              <span><strong>Bao Bì Khóa Zip Đa Lớp:</strong> Bảo quản độ tươi ngon tối đa, chống ẩm mốc tự nhiên mà không cần hóa chất.</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- TẦM NHÌN & SỨ MỆNH (#tam-nhin-su-menh) -->
+  <section id="tam-nhin-su-menh" class="py-12 sm:py-20 bg-white border-t border-brand-border/70">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center max-w-3xl mx-auto mb-12 sm:mb-16">
+        <Badge variant="brand" pill class="mb-3">Tầm Nhìn &amp; Sứ Mệnh</Badge>
+        <h2 class="text-2xl sm:text-4xl font-black text-brand-dark tracking-tight">
+          3 Trụ Cột Phát Triển Bền Vững Của LA PET
+        </h2>
+        <p class="mt-3 text-xs sm:text-base text-brand-muted">
+          Định hướng hành động xuyên suốt trong mọi hoạt động sản xuất, phân phối và hợp tác kinh doanh.
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8">
+        {pillars.map((item) => (
+          <div class="p-6 sm:p-8 rounded-2xl bg-brand-surface border border-brand-border hover:shadow-card hover:-translate-y-1 transition-all duration-200">
+            <div class="w-12 h-12 rounded-xl bg-brand-primary/10 text-brand-primary flex items-center justify-center mb-4">
+              <svg class="w-6 h-6 stroke-current fill-none stroke-2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d={item.iconPath}></path>
+              </svg>
+            </div>
+            <h3 class="text-base sm:text-lg font-bold text-brand-dark mb-2">{item.title}</h3>
+            <p class="text-xs sm:text-sm text-brand-muted leading-relaxed">{item.desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- KHÁCH HÀNG & ĐỐI TÁC ĐẠI LÝ (#khach-hang-doi-tac) -->
+  <section id="khach-hang-doi-tac" class="py-12 sm:py-20 bg-brand-surface border-t border-brand-border/70">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="bg-brand-dark text-white rounded-2xl p-8 sm:p-12 lg:p-16 relative overflow-hidden shadow-card">
+        <div class="max-w-2xl relative z-10">
+          <span class="inline-block px-3 py-1 rounded-full bg-brand-accent/20 text-brand-accent font-bold text-xs uppercase tracking-wider mb-4">
+            Mạng Lưới Đối Tác Toàn Quốc
+          </span>
+          <h2 class="text-2xl sm:text-4xl font-black leading-tight">
+            Gia Nhập Hệ Thống Đại Lý Phân Phối LA PET
+          </h2>
+          <p class="mt-4 text-white/80 text-xs sm:text-base leading-relaxed">
+            Hơn 500+ Pet Shop, Spa Grooming, và Phòng khám thú y đã chọn LA PET làm đối tác tin cậy nhờ chính sách chiết khấu minh bạch, hỗ trợ đổi trả và kho vận hỏa tốc.
+          </p>
+          
+          <div class="mt-8 flex flex-wrap gap-4">
+            <Button href="/lien-he#partner-registration" variant="accent" size="lg">
+              Đăng ký đại lý ngay
+            </Button>
+            <Button href="/lien-he" variant="outline" size="lg" class="border-white/30 text-white hover:bg-white/10">
+              Liên hệ tư vấn
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</BaseLayout>
+

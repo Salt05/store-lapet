@@ -3,7 +3,9 @@
 import {
   getAutomaticPromotions,
   type ProductFixedPricePromotion,
+  type Promotion,
 } from '../config/promotion';
+import { configService } from './config.service';
 
 /**
  * Helper chuẩn hóa SKU đồng nhất: loại bỏ khoảng trắng thừa và ép về chữ hoa.
@@ -107,6 +109,15 @@ export interface PromotionEngineResult {
 }
 
 export class PromotionEngine {
+  public static async calculateCartDynamic(
+    cartItems: CartItem[],
+    date = new Date(),
+    customerContext?: CustomerContext
+  ): Promise<PromotionEngineResult> {
+    const activePromos = await configService.getActivePromotions(date);
+    return this.calculateCart(cartItems, date, customerContext, activePromos);
+  }
+
   /**
    * Tính toán toàn bộ khuyến mãi cho giỏ hàng.
    * Khuyến mãi tự động được duyệt theo thứ tự Priority tăng dần (Priority nhỏ chạy trước).
@@ -114,7 +125,8 @@ export class PromotionEngine {
   public static calculateCart(
     cartItems: CartItem[],
     date = new Date(),
-    customerContext?: CustomerContext
+    customerContext?: CustomerContext,
+    overridePromotions?: Promotion[]
   ): PromotionEngineResult {
     // 1. Khởi tạo danh sách item ban đầu & chuẩn hóa SKU
     let processedItems: CartItem[] = cartItems.map((item) => ({
@@ -128,7 +140,9 @@ export class PromotionEngine {
     }));
 
     // 2. Lấy danh sách khuyến mãi tự động (đã được sắp xếp sẵn theo priority)
-    const automaticPromotions = getAutomaticPromotions(date);
+    const automaticPromotions = overridePromotions
+      ? overridePromotions.filter((p) => p.applicationMode === 'automatic').sort((a, b) => a.priority - b.priority)
+      : getAutomaticPromotions(date);
 
     const appliedFixedPromos: string[] = [];
     const appliedTierPromos: Array<{

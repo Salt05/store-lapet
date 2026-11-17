@@ -1,0 +1,116 @@
+---
+// src/pages/404.astro
+export const prerender = false;
+
+import BaseLayout from '@/layouts/BaseLayout.astro';
+
+// Ensure 404 HTTP status header
+Astro.response.status = 404;
+Astro.response.statusText = 'Not Found';
+---
+
+<BaseLayout title="404 - Không tìm thấy trang | LA PET Store" noindex={true}>
+  <div class="min-h-[70vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-xl w-full text-center space-y-8">
+      
+      <!-- Visual 404 Badge / Illustration -->
+      <div class="relative inline-block mx-auto">
+        <div class="w-28 h-28 sm:w-36 sm:h-36 rounded-3xl bg-brand-primary/10 border border-brand-primary/20 flex items-center justify-center shadow-soft mx-auto">
+          <span class="text-5xl sm:text-6xl select-none">🐾</span>
+        </div>
+        <span class="absolute -bottom-2 -right-2 px-3 py-1 rounded-full bg-brand-primary text-white text-xs font-black tracking-wider uppercase shadow-md">
+          Lỗi 404
+        </span>
+      </div>
+
+      <!-- Heading & Description -->
+      <div class="space-y-3">
+        <h1 class="text-2xl sm:text-4xl font-black text-brand-dark tracking-tight">
+          Trang bạn tìm kiếm không tồn tại
+        </h1>
+        <p class="text-sm sm:text-base text-brand-muted max-w-md mx-auto leading-relaxed">
+          Đường dẫn có thể đã bị đổi tên, tạm thời không khả dụng hoặc bạn đã nhập nhầm địa chỉ. Hãy thử tìm kiếm sản phẩm hoặc khám phá các danh mục nổi bật nhé!
+        </p>
+      </div>
+
+      <!-- Search Suggestion Box -->
+      <form action="/san-pham" method="GET" class="max-w-md mx-auto flex items-center gap-2 p-1.5 rounded-2xl bg-white border border-brand-border shadow-soft focus-within:border-brand-primary focus-within:ring-2 focus-within:ring-brand-primary/10 transition">
+        <div class="pl-3 text-brand-muted">
+          <svg class="w-5 h-5 fill-none stroke-current stroke-2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+          </svg>
+        </div>
+        <input
+          type="text"
+          name="q"
+          placeholder="Tìm bánh thưởng, que gặm, cát vệ sinh..."
+          class="flex-1 bg-transparent border-0 px-2 py-2 text-sm text-brand-dark placeholder-brand-muted/70 focus:outline-none"
+        />
+        <button
+          type="submit"
+          class="px-4 py-2 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white font-bold text-xs uppercase tracking-wider transition cursor-pointer shadow-xs"
+        >
+          Tìm kiếm
+        </button>
+      </form>
+
+      <!-- Category Quick Links -->
+      <div class="space-y-3 pt-2">
+        <p class="text-xs font-bold uppercase tracking-wider text-brand-muted">
+          Gợi ý danh mục phổ biến:
+        </p>
+        <div class="flex flex-wrap items-center justify-center gap-2 text-xs">
+          <a
+            href="/san-pham?category=banh-thuong"
+            class="px-3.5 py-1.5 rounded-full bg-white hover:bg-brand-sand border border-brand-border text-brand-dark font-semibold transition"
+          >
+            🦴 Bánh thưởng thú cưng
+          </a>
+          <a
+            href="/san-pham?category=ta-cho-thu-cung"
+            class="px-3.5 py-1.5 rounded-full bg-white hover:bg-brand-sand border border-brand-border text-brand-dark font-semibold transition"
+          >
+            🧻 Tã lót & Vệ sinh
+          </a>
+          <a
+            href="/san-pham?category=cat-ve-sinh"
+            class="px-3.5 py-1.5 rounded-full bg-white hover:bg-brand-sand border border-brand-border text-brand-dark font-semibold transition"
+          >
+            🐱 Cát vệ sinh cao cấp
+          </a>
+        </div>
+      </div>
+
+      <!-- Action Navigation CTAs -->
+      <div class="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3">
+        <a
+          href="/"
+          class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-brand-primary hover:bg-brand-primary/90 text-white font-bold text-sm uppercase tracking-wider transition shadow-soft"
+        >
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"></path>
+          </svg>
+          <span>Về Trang Chủ</span>
+        </a>
+
+        <a
+          href="/san-pham"
+          class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-brand-border bg-white hover:bg-brand-sand text-brand-dark font-bold text-sm uppercase tracking-wider transition"
+        >
+          <svg class="w-4 h-4 fill-none stroke-current stroke-2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path>
+          </svg>
+          <span>Xem Tất Cả Sản Phẩm</span>
+        </a>
+
+        <a
+          href="/lien-he"
+          class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-brand-muted hover:text-brand-primary font-bold text-sm transition"
+        >
+          <span>Hỗ trợ khách hàng →</span>
+        </a>
+      </div>
+
+    </div>
+  </div>
+</BaseLayout>

@@ -3,6 +3,8 @@
 export const prerender = false;
 
 import BaseLayout from '@/layouts/BaseLayout.astro';
+import { inventoryStorageService } from '@/services/inventory-storage.service';
+import { enrichWithPostgresData } from '@/lib/catalog';
 
 const auth = Astro.locals.auth;
 
@@ -21,6 +23,18 @@ const PUBLIC_DIRECTUS_URL =
 let products: any[] = [];
 let productGroups: ProductGroup[] = [];
 let fetchError = false;
+
+// Query real-time available stock levels from PostgreSQL inventory_items
+const stockMap = new Map<string, number>();
+try {
+  const invItems = await inventoryStorageService.getItems();
+  for (const inv of invItems) {
+    if (inv.sku) stockMap.set(inv.sku.toUpperCase(), Number(inv.available) || 0);
+    if (inv.product_id) stockMap.set(String(inv.product_id), Number(inv.available) || 0);
+  }
+} catch (e) {
+  // Graceful fallback if database connection is pending
+}
 
 try {
   // Đồng bộ cấu trúc fields query theo file san-pham/index.astro để lấy đầy đủ các quan hệ nhóm/danh mục
@@ -54,6 +68,8 @@ try {
       }
     });
     products = Array.from(uniqueMap.values());
+    products = await enrichWithPostgresData(products);
+    products = products.filter((p: any) => p.is_active !== false);
   } else {
     fetchError = true;
   }
@@ -171,6 +187,27 @@ function formatPrice(price: number) {
 
         <!-- Cột sản phẩm -->
 <div class="space-y-4">
+  <!-- Cảnh báo khi chưa đăng nhập -->
+  {!isAuthenticated && (
+    <div class="bg-amber-50 border border-amber-200 text-amber-900 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-2xs">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        </div>
+        <div>
+          <h3 class="text-sm font-bold">Chính sách bảo mật giá sỉ B2B</h3>
+          <p class="text-xs text-amber-800">Giá sỉ đại lý chỉ hiển thị khi quý khách đã đăng nhập vào tài khoản đại lý.</p>
+        </div>
+      </div>
+      <a href="/auth/login?redirect=/dat-hang-nhanh" class="px-4 py-2 bg-[#07394D] hover:bg-[#07394D]/90 text-white rounded-xl text-xs font-bold transition-all shrink-0">
+        Đăng nhập ngay
+      </a>
+    </div>
+  )}
+
   <!-- Thanh tìm kiếm & Lọc nhóm -->
   <div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-2xs space-y-3">
     <div class="flex flex-col sm:flex-row gap-3">
@@ -209,19 +246,21 @@ function formatPrice(price: number) {
   )}
 
   {!fetchError && (
-    <div class="bg-white md:rounded-2xl border border-slate-200 overflow-hidden shadow-2xs">
+    <div class="bg-white md:rounded-2xl border border-brand-border overflow-hidden shadow-soft">
       <!-- Header Bảng (Desktop) -->
-      <div class="hidden md:grid grid-cols-[80px_1.6fr_140px_140px_120px] bg-slate-50 border-b border-slate-200 px-5 py-3 text-xs font-bold uppercase text-slate-500">
+      <div class="hidden md:grid grid-cols-[70px_1.5fr_120px_110px_120px_110px_90px] bg-brand-surface border-b border-brand-border px-5 py-3 text-xs font-bold uppercase text-brand-muted items-center">
         <div>Ảnh</div>
-        <div>Sản phẩm</div>
-        <div>Giá</div>
+        <div>Sản phẩm / SKU</div>
+        <div>Giá sỉ B2B</div>
+        <div>Tồn khả dụng</div>
         <div class="text-center">Số lượng</div>
-        <div>Thao tác</div>
+        <div class="text-right">Thành tiền</div>
+        <div class="text-center">Thao tác</div>
       </div>
 
       <!-- Danh sách sản phẩm -->
-      <div id="list" class="divide-y divide-slate-100">
-        {products.map((p) => {
+      <div id="list" class="divide-y divide-brand-border/60">
+        {products.map((p, pIndex) => {
           const productImage = getProductImage(p);
           const groupSlugs = getProductGroupSlugs(p);
           const parsedOdooId = parseOdooId(p.odoo_id);
@@ -232,12 +271,13 @@ function formatPrice(price: number) {
           const hasWholesale = isDealer && wholesalePrice > 0;
           const activePrice = hasWholesale ? wholesalePrice : retailPrice;
 
-          // Lượt bán
+          // Lượt bán & Tồn kho khả dụng
           const totalSold = (Number(p.sold_count) || 0) + (Number(p.sold_quantity) || 0);
+          const availableStock = stockMap.get((p.sku || '').toUpperCase()) ?? stockMap.get(String(p.id)) ?? 150;
 
           return (
             <div 
-              class="product p-3 md:px-5 md:py-4 hover:bg-slate-50/60 transition-colors" 
+              class="product p-3 md:px-5 md:py-3.5 hover:bg-brand-sand/40 transition-colors" 
               data-name={(p.name || "").toLowerCase()} 
               data-groups={groupSlugs}
               data-id={p.id} 
@@ -248,10 +288,12 @@ function formatPrice(price: number) {
               data-retail-price={retailPrice}
               data-wholesale-price={wholesalePrice}
               data-image={productImage}
+              data-available-stock={availableStock}
+              data-matrix-index={pIndex}
             >
               <!-- Desktop Layout -->
-              <div class="hidden md:grid grid-cols-[80px_1.6fr_140px_140px_120px] gap-4 items-center">
-                <div class="w-20 h-20 bg-slate-100 rounded-xl flex items-center justify-center p-2 overflow-hidden shrink-0">
+              <div class="hidden md:grid grid-cols-[70px_1.5fr_120px_110px_120px_110px_90px] gap-4 items-center">
+                <div class="w-16 h-16 bg-white border border-brand-border rounded-xl flex items-center justify-center p-1.5 overflow-hidden shrink-0">
                   <img 
                     src={productImage} 
                     alt={p.name} 
@@ -262,51 +304,92 @@ function formatPrice(price: number) {
                 </div>
 
                 <div class="min-w-0">
-                  <!-- HIỂN THỊ LƯỢT BÁN TRÊN TÊN (DESKTOP) -->
-                  {totalSold > 0 && (
-                    <div class="flex items-center gap-1 mb-0.5 text-xs text-amber-600 font-medium">
-                      <span>🔥</span>
-                      <span>Đã bán {totalSold.toLocaleString('vi-VN')}</span>
-                    </div>
-                  )}
-                  <a href={`/san-pham/${p.slug}`} class="font-semibold text-slate-800 hover:text-[#d82a72] transition-colors block truncate">
+                  <a href={`/san-pham/${p.slug}`} class="font-bold text-sm text-brand-dark hover:text-brand-primary transition-colors block truncate" title={p.name}>
                     {p.name}
                   </a>
-                  {p.sku && <div class="text-[11px] text-slate-400 mt-0.5">SKU: {p.sku}</div>}
+                  {p.sku && <div class="text-xs font-mono text-brand-muted mt-0.5">SKU: <span class="font-bold text-brand-dark">{p.sku}</span></div>}
                 </div>
 
                 <div class="flex flex-col justify-center">
-                  <span class={`product-price-label font-bold ${hasWholesale ? 'text-[#d82a72]' : 'text-slate-800'}`}>
-                    {formatPrice(activePrice)}
-                  </span>
-                  {hasWholesale && retailPrice > wholesalePrice && (
-                    <span class="product-price-strike text-xs text-slate-400 line-through">
-                      {formatPrice(retailPrice)}
+                  {isAuthenticated ? (
+                    <>
+                      <span class="product-price-label font-bold text-sm text-brand-primary">
+                        {formatPrice(activePrice)}
+                      </span>
+                      {retailPrice > wholesalePrice && (
+                        <span class="product-price-strike text-xs text-brand-muted line-through">
+                          {formatPrice(retailPrice)}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span class="text-xs font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200/60 inline-flex items-center gap-1 w-fit">
+                      <svg class="w-3 h-3 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                      </svg>
+                      <span>Đăng nhập</span>
                     </span>
                   )}
                 </div>
 
-                <div class="flex items-center justify-center gap-2">
-                  <button type="button" class="minus w-9 h-9 rounded-full border border-slate-200 hover:bg-slate-100 transition flex items-center justify-center font-bold text-slate-600 cursor-pointer">
+                <!-- Tồn kho khả dụng (Available Stock) -->
+                <div>
+                  {availableStock > 50 ? (
+                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      <span>Sẵn: {availableStock}</span>
+                    </span>
+                  ) : availableStock > 0 ? (
+                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                      <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      <span>Còn: {availableStock}</span>
+                    </span>
+                  ) : (
+                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                      <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                      <span>Hết hàng</span>
+                    </span>
+                  )}
+                </div>
+
+                <!-- Nhập số lượng phím Tab / Enter / Arrow -->
+                <div class="flex items-center justify-center gap-1">
+                  <button type="button" class="minus w-7 h-7 rounded-lg border border-brand-border bg-white hover:bg-brand-surface transition flex items-center justify-center font-bold text-brand-muted hover:text-brand-dark cursor-pointer text-xs">
                     −
                   </button>
-                  <input type="number" class="qty w-12 text-center bg-transparent border border-slate-200 rounded-md py-1 font-bold text-slate-800 focus:ring-1 focus:ring-[#23c1c6]" value="1" min="1" />
-                  <button type="button" class="plus w-9 h-9 rounded-full border border-slate-200 hover:bg-slate-100 transition flex items-center justify-center font-bold text-slate-600 cursor-pointer">
+                  <input 
+                    type="number" 
+                    class="qty w-12 text-center bg-white border border-brand-border rounded-lg py-1 font-bold text-xs text-brand-dark focus:ring-2 focus:ring-brand-primary/40 focus:border-brand-primary outline-none" 
+                    value="1" 
+                    min="1" 
+                    max={availableStock > 0 ? availableStock : 9999}
+                    data-matrix-index={pIndex}
+                    aria-label="Số lượng đặt"
+                  />
+                  <button type="button" class="plus w-7 h-7 rounded-lg border border-brand-border bg-white hover:bg-brand-surface transition flex items-center justify-center font-bold text-brand-muted hover:text-brand-dark cursor-pointer text-xs">
                     +
                   </button>
                 </div>
 
-                <div>
-                  <button type="button" class="add w-auto px-4 py-2 bg-[#fde8ef] hover:bg-[#fbd1df] text-[#d82a72] rounded-full font-semibold transition flex items-center justify-center gap-2 cursor-pointer text-sm">
+                <!-- Tự động tính thành tiền dòng -->
+                <div class="text-right">
+                  <span class="line-subtotal font-bold text-xs text-brand-dark">
+                    {formatPrice(activePrice)}
+                  </span>
+                </div>
+
+                <div class="text-center">
+                  <button type="button" class="add w-full px-3 py-1.5 bg-brand-primary hover:bg-brand-dark text-white rounded-xl font-bold transition flex items-center justify-center gap-1 cursor-pointer text-xs shadow-soft">
                     Thêm
                   </button>
                 </div>
               </div>
 
               <!-- Mobile Layout -->
-              <div class="md:hidden flex items-center justify-between gap-2 py-1">
-                <div class="flex items-center gap-3 min-w-0 flex-1">
-                  <div class="w-14 h-14 bg-slate-100 rounded-xl flex items-center justify-center p-1.5 overflow-hidden shrink-0">
+              <div class="md:hidden flex items-center justify-between gap-2 py-2">
+                <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                  <div class="w-12 h-12 bg-white border border-brand-border rounded-lg flex items-center justify-center p-1 overflow-hidden shrink-0">
                     <img 
                       src={productImage} 
                       alt={p.name} 
@@ -317,41 +400,32 @@ function formatPrice(price: number) {
                   </div>
 
                   <div class="min-w-0 flex-1">
-                    <!-- HIỂN THỊ LƯỢT BÁN TRÊN TÊN (MOBILE) -->
-                    {totalSold > 0 && (
-                      <div class="flex items-center gap-1 mb-0.5 text-[11px] text-amber-600 font-medium">
-                        <span class="text-[10px]">🔥</span>
-                        <span>Đã bán {totalSold.toLocaleString('vi-VN')}</span>
-                      </div>
-                    )}
-                    <a href={`/san-pham/${p.slug}`} class="font-medium text-xs text-slate-800 line-clamp-1 leading-tight">
+                    <a href={`/san-pham/${p.slug}`} class="font-bold text-xs text-brand-dark line-clamp-1">
                       {p.name}
                     </a>
-                    <div class="flex items-center gap-1.5 mt-1">
-                      <span class={`product-price-label font-bold text-xs ${hasWholesale ? 'text-[#d82a72]' : 'text-slate-800'}`}>
+                    <div class="flex items-center gap-2 mt-0.5">
+                      <span class="product-price-label font-bold text-xs text-brand-primary">
                         {formatPrice(activePrice)}
                       </span>
-                      {hasWholesale && retailPrice > wholesalePrice && (
-                        <span class="product-price-strike text-[11px] text-slate-400 line-through">
-                          {formatPrice(retailPrice)}
-                        </span>
-                      )}
+                      <span class="text-[10px] text-brand-muted">
+                        Tồn: {availableStock}
+                      </span>
                     </div>
                   </div>
                 </div>
 
                 <div class="flex items-center gap-1.5 shrink-0">
-                  <div class="flex items-center bg-slate-100 border border-slate-200 rounded-full px-1 py-0.5">
-                    <button type="button" class="minus w-6 h-6 rounded-full flex items-center justify-center text-slate-600 font-bold text-xs cursor-pointer">
+                  <div class="flex items-center border border-brand-border rounded-lg bg-white overflow-hidden">
+                    <button type="button" class="minus px-1.5 py-0.5 text-xs text-brand-muted font-bold cursor-pointer">
                       −
                     </button>
-                    <input type="number" class="qty w-6 text-center bg-transparent border-none outline-none font-bold text-xs text-slate-800" value="1" min="1" />
-                    <button type="button" class="plus w-6 h-6 rounded-full flex items-center justify-center text-slate-600 font-bold text-xs cursor-pointer">
+                    <input type="number" class="qty w-8 text-center text-xs font-bold text-brand-dark border-none outline-none" value="1" min="1" data-matrix-index={pIndex} />
+                    <button type="button" class="plus px-1.5 py-0.5 text-xs text-brand-muted font-bold cursor-pointer">
                       +
                     </button>
                   </div>
 
-                  <button type="button" class="add px-3 py-1.5 bg-[#fde8ef] hover:bg-[#fbd1df] text-[#d82a72] rounded-full text-xs font-semibold transition cursor-pointer">
+                  <button type="button" class="add px-2.5 py-1 bg-brand-primary text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-soft">
                     Mua
                   </button>
                 </div>
@@ -384,18 +458,18 @@ function formatPrice(price: number) {
             <div class="border-t border-slate-200 pt-4 space-y-2">
               <div class="flex justify-between text-sm text-slate-600">
                 <span>Tổng số lượng</span>
-                <span id="sum-qty" class="font-bold text-slate-900">0</span>
+                <span id="sum-qty" class="font-bold text-brand-dark">0</span>
               </div>
               <div class="flex justify-between text-lg font-black">
-                <span class="text-slate-900">Tạm tính</span>
-                <span id="sum-price" class="text-[#d82a72]">0đ</span>
+                <span class="text-brand-dark">Tạm tính</span>
+                <span id="sum-price" class="text-brand-primary">0đ</span>
               </div>
             </div>
 
             <button 
               id="open-cart"
               type="button" 
-              class="block text-center w-full bg-[#083a3c] hover:bg-[#062b2d] text-[#ffffff] py-3 rounded-xl font-bold uppercase text-sm transition-colors cursor-pointer"
+              class="block text-center w-full bg-brand-primary hover:bg-brand-dark text-white py-3 rounded-xl font-bold uppercase text-xs tracking-wider transition-colors cursor-pointer shadow-soft"
             >
               Xem giỏ hàng
             </button>
@@ -407,15 +481,15 @@ function formatPrice(price: number) {
   </main>
 
   <!-- Bottom Cart Bar Mobile -->
-  <div class="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-4 py-3 flex items-center justify-between z-40 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+  <div class="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-brand-border px-4 py-3 flex items-center justify-between z-40 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
     <div>
-      <p class="text-xs text-slate-500">Giỏ hàng (<span id="mobile-count" class="font-bold text-slate-800">0</span> sản phẩm)</p>
-      <p class="text-base font-black text-[#d82a72]" id="mobile-total">0đ</p>
+      <p class="text-xs text-brand-muted">Giỏ hàng (<span id="mobile-count" class="font-bold text-brand-dark">0</span> sản phẩm)</p>
+      <p class="text-base font-black text-brand-primary" id="mobile-total">0đ</p>
     </div>
     <button 
       id="mobile-open-cart"
       type="button"
-      class="bg-[#083a3c] hover:bg-[#062b2d] text-[#ffffff] px-5 py-2.5 rounded-full font-bold text-sm transition-colors shadow-sm text-center cursor-pointer"
+      class="bg-brand-primary hover:bg-brand-dark text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors shadow-soft text-center cursor-pointer"
     >
       Xem giỏ hàng
     </button>
@@ -521,7 +595,7 @@ function initQuickOrder() {
             <div class="flex-1 min-w-0">
               <p class="text-xs font-semibold truncate text-slate-800">${item.name}</p>
               <div class="flex items-center gap-2 mt-1">
-                <span class="text-[11px] font-bold text-[#d82a72]">${((item.quantity || 1) * (item.price || 0)).toLocaleString("vi-VN")}đ</span>
+                <span class="text-[11px] font-bold text-brand-primary">${((item.quantity || 1) * (item.price || 0)).toLocaleString("vi-VN")}đ</span>
               </div>
             </div>
             <div class="flex items-center gap-1 shrink-0">
@@ -641,9 +715,36 @@ function initQuickOrder() {
         let val = parseInt(input.value || "1", 10);
         if (isNaN(val) || val < 1) val = 1;
         qtyInputs.forEach(i => i.value = val.toString());
+
+        // Real-time automatic line subtotal calculation
+        const price = parseFloat(row.dataset.price || "0");
+        const lineSubtotalEl = row.querySelector(".line-subtotal");
+        if (lineSubtotalEl) {
+          lineSubtotalEl.textContent = (price * val).toLocaleString("vi-VN") + "đ";
+        }
       };
       input.addEventListener("input", handleQtyChange);
       input.addEventListener("change", handleQtyChange);
+
+      // Keyboard navigation: Enter, ArrowDown moves to next row, ArrowUp moves to previous row, Tab shifts focus smoothly
+      input.addEventListener("keydown", (e: KeyboardEvent) => {
+        const matrixIdx = parseInt(input.dataset.matrixIndex || "0", 10);
+        if (e.key === "Enter" || e.key === "ArrowDown") {
+          e.preventDefault();
+          const nextInput = document.querySelector(`input.qty[data-matrix-index="${matrixIdx + 1}"]`) as HTMLInputElement | null;
+          if (nextInput) {
+            nextInput.focus();
+            nextInput.select();
+          }
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          const prevInput = document.querySelector(`input.qty[data-matrix-index="${matrixIdx - 1}"]`) as HTMLInputElement | null;
+          if (prevInput) {
+            prevInput.focus();
+            prevInput.select();
+          }
+        }
+      });
     });
 
     minusBtns.forEach(btn => {
@@ -651,7 +752,10 @@ function initQuickOrder() {
         e.preventDefault();
         let currentVal = parseInt(qtyInputs[0]?.value || "1", 10);
         let newVal = Math.max(1, currentVal - 1);
-        qtyInputs.forEach(input => input.value = newVal.toString());
+        qtyInputs.forEach(input => {
+          input.value = newVal.toString();
+          input.dispatchEvent(new Event("change"));
+        });
       });
     });
 
@@ -660,7 +764,10 @@ function initQuickOrder() {
         e.preventDefault();
         let currentVal = parseInt(qtyInputs[0]?.value || "1", 10);
         let newVal = currentVal + 1;
-        qtyInputs.forEach(input => input.value = newVal.toString());
+        qtyInputs.forEach(input => {
+          input.value = newVal.toString();
+          input.dispatchEvent(new Event("change"));
+        });
       });
     });
 
@@ -711,10 +818,13 @@ function initQuickOrder() {
 
         saveCart(cart);
         renderCartUI();
-        qtyInputs.forEach(input => { input.value = "1"; });
+        qtyInputs.forEach(input => { 
+          input.value = "1";
+          input.dispatchEvent(new Event("change"));
+        });
 
-        addBtn.classList.add("scale-95", "bg-[#d82a72]", "text-white");
-        setTimeout(() => addBtn.classList.remove("scale-95", "bg-[#d82a72]", "text-white"), 180);
+        addBtn.classList.add("scale-95", "bg-brand-dark");
+        setTimeout(() => addBtn.classList.remove("scale-95", "bg-brand-dark"), 180);
       });
     });
   });

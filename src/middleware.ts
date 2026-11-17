@@ -1,17 +1,43 @@
 import { defineMiddleware } from 'astro:middleware';
-import { getAuthState } from './lib/auth';
+import { getAuthState, getAdminAuthState } from './lib/auth';
+
+try {
+  if (typeof (process as any).loadEnvFile === 'function') {
+    (process as any).loadEnvFile();
+  }
+} catch {
+  // Safe ignore nếu môi trường đã có biến hoặc file .env đã nạp
+}
 
 export const onRequest = defineMiddleware(async (context, next) => {
-  /**
-   * P0 AUTH
-   *
-   * Astro Session
-   *      ↓
-   * getAuthState()
-   *      ↓
-   * Astro.locals.auth
-   */
   context.locals.auth = await getAuthState(context);
+  context.locals.adminAuth = await getAdminAuthState(context);
+
+  const pathname = context.url.pathname;
+
+  // Bảo vệ route Admin Dashboard
+  if (pathname.startsWith('/admin')) {
+    const isLoginRoute = pathname === '/admin/login' || pathname === '/admin/login/';
+    if (!context.locals.adminAuth?.isAdmin) {
+      if (!isLoginRoute) {
+        return context.redirect('/admin/login');
+      }
+    } else {
+      if (isLoginRoute) {
+        return context.redirect('/admin');
+      }
+    }
+  }
+
+  // Bảo vệ API Admin
+  if (pathname.startsWith('/api/admin/') && !pathname.startsWith('/api/admin/auth/')) {
+    if (!context.locals.adminAuth?.isAdmin) {
+      return new Response(
+        JSON.stringify({ success: false, error: 'Yêu cầu quyền Quản trị viên' }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+  }
 
   const response = await next();
 

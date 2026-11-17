@@ -23,7 +23,7 @@ export const GET: APIRoute = async ({ locals }) => {
           authenticated: false,
           isDealer: false,
           partner: null,
-          error: 'Không tìm thấy thông tin đại lý trên Odoo',
+          error: 'Không tìm thấy thông tin đại lý trên hệ thống B2B LA PET',
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       );

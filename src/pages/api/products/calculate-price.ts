@@ -53,23 +53,39 @@ export const POST: APIRoute = async ({
 
     const { items } = body;
 
-    if (
-      !Array.isArray(items) ||
-      items.length === 0
-    ) {
+    if (!Array.isArray(items)) {
+      return new Response(
+        JSON.stringify({ error: 'Payload không hợp lệ (items phải là mảng).' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Boundary check [T2.1.3]: Reject negative quantities with 400 Bad Request
+    if (items.some((it: any) => (typeof it?.quantity === 'number' && it.quantity < 0) || (typeof it?.qty === 'number' && it.qty < 0))) {
+      return new Response(
+        JSON.stringify({ error: 'Số lượng sản phẩm không hợp lệ (không được âm).' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (items.length === 0) {
       return new Response(
         JSON.stringify({
+          success: true,
           items: [],
           subtotal: 0,
           discount_amount: 0,
           vat_amount: 0,
           total: 0,
-
+          summary: {
+            subtotal: 0,
+            discount_total: 0,
+            total: 0,
+          },
           appliedPromotions: {
             fixedPricePromos: [],
             categoryTierPromos: [],
           },
-
           proposedPromotions: {
             categoryTierPromos: [],
           },
@@ -77,8 +93,7 @@ export const POST: APIRoute = async ({
         {
           status: 200,
           headers: {
-            'Content-Type':
-              'application/json',
+            'Content-Type': 'application/json',
           },
         }
       );
@@ -94,37 +109,28 @@ export const POST: APIRoute = async ({
         items
       );
 
+    const subtotal = Number(priceDetails.subtotal || 0);
+    const discount_amount = Number(priceDetails.discount_amount || 0);
+    const total = Number(priceDetails.total || 0);
+
     return new Response(
       JSON.stringify({
-        items:
-          priceDetails.items || [],
-
-        subtotal:
-          Number(
-            priceDetails.subtotal || 0
-          ),
-
-        discount_amount:
-          Number(
-            priceDetails.discount_amount || 0
-          ),
-
-        vat_amount:
-          Number(
-            priceDetails.vat_amount || 0
-          ),
-
-        total:
-          Number(
-            priceDetails.total || 0
-          ),
-
+        success: true,
+        items: priceDetails.items || [],
+        subtotal,
+        discount_amount,
+        vat_amount: Number(priceDetails.vat_amount || 0),
+        total,
+        summary: {
+          subtotal,
+          discount_total: discount_amount,
+          total,
+        },
         appliedPromotions:
           priceDetails.appliedPromotions || {
             fixedPricePromos: [],
             categoryTierPromos: [],
           },
-
         proposedPromotions:
           priceDetails.proposedPromotions || {
             categoryTierPromos: [],
@@ -133,8 +139,7 @@ export const POST: APIRoute = async ({
       {
         status: 200,
         headers: {
-          'Content-Type':
-            'application/json',
+          'Content-Type': 'application/json',
         },
       }
     );

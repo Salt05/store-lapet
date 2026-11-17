@@ -53,6 +53,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const result = await orderService.createQuotation({
       partner_id: numericPartnerId,
+      payment_method: body?.payment_method,
       shipping_address_id: body?.shipping_address_id ? Number(body.shipping_address_id) : undefined,
       is_custom_address: Boolean(body?.is_custom_address),
       custom_address: body?.custom_address,
@@ -70,7 +71,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     return jsonResponse(
-      { error: error?.message || 'Lỗi khi tạo báo giá Odoo' },
+      { error: error?.message || 'Lỗi khi tạo đơn nháp B2B' },
       500
     );
   }

@@ -7,12 +7,35 @@ import '../styles/global.css';
 interface Props {
   title?: string;
   description?: string;
+  image?: string;
+  canonical?: string;
+  type?: 'website' | 'article' | 'product';
+  noindex?: boolean;
+  hideFooter?: boolean;
 }
 
 const { 
-  title = 'LA PET - Thương Hiệu Sản Phẩm Thú Cưng Cao Cấp', 
-  description = 'Chuyên cung cấp các sản phẩm phụ kiện, bánh thưởng, tã lót và cát vệ sinh chất lượng cao cho thú cưng.' 
+  title = 'LA PET - Cổng Đặt Hàng B2B Đại Lý Phụ Kiện & Thức Ăn Thú Cưng', 
+  description = 'Thương hiệu sản phẩm thú cưng cao cấp LA PET. Cung cấp bánh thưởng, tã lót, cát vệ sinh và que gặm chất lượng cao với chính sách giá sỉ hấp dẫn cho đại lý toàn quốc.',
+  image,
+  canonical,
+  type = 'website',
+  noindex = false,
+  hideFooter = false,
 } = Astro.props;
+
+const siteUrl = (
+  import.meta.env.PUBLIC_SITE_URL || 
+  (Astro.site ? Astro.site.toString() : '') ||
+  'https://store.lapet.vn'
+).replace(/\/+$/, '');
+
+const canonicalURL = canonical || new URL(Astro.url.pathname, siteUrl).href;
+
+const defaultOgImage = `${siteUrl}/logo.webp`;
+const resolvedImage = image 
+  ? (image.startsWith('http') ? image : `${siteUrl}${image.startsWith('/') ? '' : '/'}${image}`)
+  : defaultOgImage;
 ---
 
 <!DOCTYPE html>
@@ -27,6 +50,32 @@ const {
     <title>{title}</title>
     <meta name="title" content={title} />
     <meta name="description" content={description} />
+
+    <!-- Robots Meta -->
+    {noindex ? (
+      <meta name="robots" content="noindex, nofollow" />
+    ) : (
+      <meta name="robots" content="index, follow" />
+    )}
+
+    <!-- Canonical URL -->
+    <link rel="canonical" href={canonicalURL} />
+
+    <!-- Open Graph / Facebook / Zalo -->
+    <meta property="og:type" content={type} />
+    <meta property="og:url" content={canonicalURL} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={resolvedImage} />
+    <meta property="og:site_name" content="LA PET - Cổng B2B Đại Lý" />
+    <meta property="og:locale" content="vi_VN" />
+
+    <!-- Twitter Cards -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:url" content={canonicalURL} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={resolvedImage} />
 
     <!-- Google Fonts: Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -43,7 +92,7 @@ const {
       [x-cloak] { display: none !important; }
     </style>
   </head>
-  <body class="bg-[#f9f8f6] text-slate-800 font-['Inter',sans-serif] min-h-screen flex flex-col antialiased selection:bg-[#23c1c6] selection:text-[#083a3c]">
+  <body class="bg-brand-surface text-brand-text font-sans min-h-screen flex flex-col antialiased selection:bg-brand-accent selection:text-brand-dark">
     
     <!-- Header Component -->
     <Header />
@@ -54,7 +103,62 @@ const {
     </main>
 
     <!-- Footer Component -->
-    <Footer />
+    {!hideFooter && <Footer />}
 
+    <!-- Global Cart Helper -->
+    <script is:inline>
+      window.addToLapetCart = function(btn, itemData) {
+        try {
+          const item = typeof itemData === 'string' ? JSON.parse(itemData) : itemData;
+          if (!item) return;
+          let cart = [];
+          try {
+            cart = JSON.parse(localStorage.getItem('cart') || '[]');
+          } catch(e) { cart = []; }
+          
+          const matchId = String(item.odoo_id || item.id || '');
+          const existingIdx = cart.findIndex(c => 
+            (matchId && (String(c.odoo_id) === matchId || String(c.id) === matchId)) ||
+            (c.slug && item.slug && c.slug === item.slug)
+          );
+          
+          if (existingIdx >= 0) {
+            cart[existingIdx].quantity = (Number(cart[existingIdx].quantity) || 1) + 1;
+          } else {
+            cart.push({
+              id: item.id || item.odoo_id,
+              odoo_id: item.odoo_id || item.id,
+              sku: item.sku || '',
+              name: item.name || 'Sản phẩm LA PET',
+              price: Number(item.wholesale_price || item.price || 0),
+              wholesale_price: Number(item.wholesale_price || item.price || 0),
+              retail_price: Number(item.retail_price || item.price || 0),
+              quantity: 1,
+              image: item.image || '/images/placeholder-product.svg',
+              slug: item.slug || ''
+            });
+          }
+          localStorage.setItem('cart', JSON.stringify(cart));
+          
+          window.dispatchEvent(new CustomEvent('cart-updated', {
+            detail: { item, totalCount: cart.reduce((t, i) => t + (Number(i.quantity) || 1), 0) }
+          }));
+
+          if (btn) {
+            const originalHtml = btn.innerHTML;
+            btn.innerHTML = '<span class="flex items-center justify-center gap-1 font-bold">✓ Đã thêm vào đơn</span>';
+            btn.classList.add('bg-emerald-600', 'text-white', 'border-emerald-600');
+            btn.classList.remove('bg-white', 'text-[#07394D]');
+            setTimeout(() => {
+              btn.innerHTML = originalHtml;
+              btn.classList.remove('bg-emerald-600', 'text-white', 'border-emerald-600');
+              btn.classList.add('bg-white', 'text-[#07394D]');
+            }, 1200);
+          }
+        } catch (err) {
+          console.error('addToLapetCart error:', err);
+        }
+      };
+    </script>
   </body>
 </html>

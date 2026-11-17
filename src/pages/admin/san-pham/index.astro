@@ -1,0 +1,1592 @@
+---
+// src/pages/admin/san-pham/index.astro
+import AdminLayout from '@/layouts/AdminLayout.astro';
+import { query } from '@/lib/db';
+import { configService } from '@/services/config.service';
+import fs from 'node:fs';
+import path from 'node:path';
+
+export const prerender = false;
+
+// Directus fileId mapping by cleaned SKU/Title
+const DIRECTUS_FILE_MAP: Record<string, string> = {
+  B03: '15d23b13-0a2c-4e80-a917-855fd75ef333',
+  B06: '7e1bedf6-7eb9-4011-92a0-1e84df4e1268',
+  C10: '18650f72-99c9-4b1d-be31-211da87a9907',
+  C101: '350c79bc-1a93-45f8-bf2d-5f1b01baf4ee',
+  C11: '07710f1f-98fe-48d5-97b0-d3dc86277d64',
+  C14: '2096c8a5-6aeb-483c-bfc7-426136779dcd',
+  C141: '103b12d5-9c9f-406f-80bd-605e15e420ee',
+  C17: '037dea7d-972c-4768-ac5a-01ca2567e357',
+  C22: '0fbfeacc-3659-423e-af1c-2de49466f150',
+  C24: '12d42077-0b1a-4120-ae03-9c04518650e5',
+  C28: '191c5212-3b83-412a-986f-56a540f3c1b1',
+  C33: '1d207c4c-6766-4e64-b427-2ed50d0b6e99',
+  C34: '42d8d11d-a1af-49bb-b89e-3c6c057381c8',
+  C35: '762cc054-daea-41cc-997f-b1eb99f389de',
+  C36: '1d9ef5d0-bcb0-44b9-852a-bc4f126d42b4',
+  C37: '54e98b96-ef71-46b8-b2e4-e3dfaf23f64e',
+  C38: '7e4f2f3b-7fdb-4eff-b40b-31c4d225f18f',
+  C39: '196348cf-5123-4771-af10-d495e8c99187',
+  C41: '31b314b6-42e8-4310-839b-7eaffb05c7a8',
+  C42: '0a63134f-dd60-4501-b5ef-4f3b6cfedd77',
+  D01: '0a53635f-b5f9-40bc-ba9a-eb41caab9559',
+  D02: '4872dc22-0d8d-461f-9f1d-a86cfce7b501',
+  D03: '220221f1-0c01-40f1-a5e1-d81bb7135f72',
+  DB01: '9970b143-572d-4bce-bc68-bebe171b6b8d',
+  DB02: '516710c6-108b-466f-9fe5-7acf5648b20b',
+  DB03: '90834ed0-0412-4908-b74d-78a6d35b8488',
+  DB04: '6f35dd0b-0471-4221-8b94-6dd7a7ad6c40',
+  DB05: '22390602-0ef5-410b-93d9-d5396b7aaa51',
+  DB06: '20706eb2-956b-4110-b83a-cd301ec1b2f4',
+  E01: '36fba323-2e1e-4147-87af-f8e8c5fa1ff5',
+  E02: '0a840709-7836-4873-9356-16f4c47a4902',
+  E03: '35baab0a-29ef-4a37-a9d4-618d96ec82f7',
+  E04: '7e0165f8-8406-4e17-a97e-91f49771255c',
+  E05: '96401677-4e76-4456-89fc-4a78234c53c7',
+  E06: '3313789f-e7fd-4983-ad18-999d104b362e',
+  TL: '0f2bae35-c4ec-4e2e-b580-21c1341812e0',
+  TL01: 'd7cf215f-605a-44dc-8c38-f921cc11eeba',
+  TL02: 'd7cf215f-605a-44dc-8c38-f921cc11eeba',
+  TL03: 'd7cf215f-605a-44dc-8c38-f921cc11eeba',
+  TL04: 'd7cf215f-605a-44dc-8c38-f921cc11eeba',
+  TLT: '1d8b4e35-a493-4617-bd19-9a36f61a1c2c',
+  TLT01: '2bcba05b-40b5-48e3-bdf0-08f1d2591191',
+  TLT02: '2bcba05b-40b5-48e3-bdf0-08f1d2591191',
+  TLT03: '2bcba05b-40b5-48e3-bdf0-08f1d2591191',
+  TLT04: '2bcba05b-40b5-48e3-bdf0-08f1d2591191',
+  ZC: '5d75afe3-c4a8-49cc-9815-6bf4b13fc863',
+};
+
+// Check local static webp files available in public/
+let localWebpSet = new Set<string>();
+try {
+  const pubDir = path.join(process.cwd(), 'public');
+  if (fs.existsSync(pubDir)) {
+    const list = fs.readdirSync(pubDir).filter((f) => f.endsWith('.webp'));
+    localWebpSet = new Set(list.map((f) => f.toLowerCase()));
+  }
+} catch {}
+
+function resolveImageUrl(imageUrl?: string | null, sku?: string | null): string {
+  const cleanImg = imageUrl ? String(imageUrl).trim() : '';
+  if (cleanImg && !cleanImg.includes('placeholder')) return cleanImg;
+
+  const rawSku = sku ? String(sku).trim() : '';
+  const cleanSku = rawSku.replace(/[\s_-]+/g, '').toUpperCase();
+  const lowerSku = rawSku.toLowerCase();
+
+  // 1. Check exact local webp file
+  if (localWebpSet.has(`${lowerSku}.webp`)) {
+    return `/${lowerSku}.webp`;
+  }
+  if (localWebpSet.has(`${cleanSku.toLowerCase()}.webp`)) {
+    return `/${cleanSku.toLowerCase()}.webp`;
+  }
+
+  // 2. Check Directus files proxy
+  if (cleanSku && DIRECTUS_FILE_MAP[cleanSku]) {
+    return `/api/v1/directus/assets/${DIRECTUS_FILE_MAP[cleanSku]}`;
+  }
+
+  // Fallback placeholder
+  return '/images/placeholder-product.svg';
+}
+
+function formatVndServer(amount: number): string {
+  return `${new Intl.NumberFormat('vi-VN').format(Math.round(amount || 0))} ₫`;
+}
+
+function formatCompactVnd(amount: number): string {
+  if (amount >= 1_000_000_000) return `${(amount / 1_000_000_000).toFixed(2).replace('.', ',')} tỷ ₫`;
+  if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1).replace('.', ',')} tr ₫`;
+  return formatVndServer(amount);
+}
+
+let initialProducts: any[] = [];
+let categoriesList: any[] = [];
+let baseDiscountPercent = 22;
+let errorMsg = '';
+
+let salesTotals = { totalOrders: 0, totalUnits: 0, totalRevenue: 0 };
+let topSellingProducts: Array<{
+  sku: string;
+  name: string;
+  orderCount: number;
+  qty: number;
+  revenue: number;
+  sharePercent: number;
+  available: number | null;
+  minStock: number;
+}> = [];
+let categoryStats: Array<{
+  categoryId: string | number;
+  name: string;
+  totalCount: number;
+  publishedCount: number;
+  avgWholesalePrice: number;
+  totalStock: number;
+  revenue: number;
+}> = [];
+let inventorySummary = { totalSkus: 0, totalAvailable: 0, lowStockCount: 0, outOfStockCount: 0, unlinkedProductsCount: 0 };
+let inventoryAlerts: Array<{
+  sku: string;
+  name: string;
+  onHand: number;
+  reserved: number;
+  available: number | null;
+  minStock: number;
+  alertType: 'out' | 'low' | 'unlinked';
+}> = [];
+let catalogHealth = {
+  total: 0,
+  withImage: 0,
+  withCategory: 0,
+  withInventory: 0,
+  validPricing: 0,
+  published: 0,
+  draft: 0,
+  archived: 0,
+  avgWholesalePrice: 0,
+  avgDiscountPercent: 22,
+};
+
+try {
+  baseDiscountPercent = await configService.getBaseDiscountPercent().catch(() => 22);
+
+  // 1 & 2. Truy vấn đồng thời Sản phẩm, Tồn kho và Doanh số thực tế từ PostgreSQL
+  const [pgProductsRes, invRes, skuSalesRes, totalsRes] = await Promise.all([
+    query(`
+      SELECT
+        p.id, p.sku, p.name, p.slug, p.price, p.wholesale_price,
+        p.unit, p.weight, p.category, p.image_url, p.status,
+        p.is_active, p.sold_quantity
+      FROM products p
+      ORDER BY p.id ASC
+    `),
+    query(`SELECT product_id, UPPER(sku) AS sku_upper, sku, on_hand, reserved, available, min_stock FROM inventory_items`).catch(() => ({ rows: [] })),
+    query(`
+      SELECT
+        UPPER(oi.sku) AS sku_upper,
+        MAX(oi.sku) AS sku,
+        MAX(oi.product_name) AS product_name,
+        COUNT(DISTINCT oi.order_id)::int AS order_count,
+        COALESCE(SUM(oi.quantity), 0)::int AS total_qty,
+        COALESCE(SUM(oi.price_total), 0)::numeric AS total_revenue
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.status IN ('confirmed', 'delivered', 'completed', 'sale', 'done')
+        AND oi.sku IS NOT NULL AND oi.sku <> ''
+      GROUP BY UPPER(oi.sku)
+      ORDER BY total_revenue DESC, total_qty DESC
+    `).catch(() => ({ rows: [] })),
+    query(`
+      SELECT
+        COUNT(DISTINCT o.id)::int AS total_orders,
+        COALESCE(SUM(oi.quantity), 0)::int AS total_units,
+        COALESCE(SUM(oi.price_total), 0)::numeric AS total_revenue
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.status IN ('confirmed', 'delivered', 'completed', 'sale', 'done')
+    `).catch(() => ({ rows: [] })),
+  ]);
+
+  const invBySku = new Map<string, { sku: string; onHand: number; reserved: number; available: number; minStock: number }>();
+  for (const r of invRes.rows) {
+    const key = String(r.sku_upper || '').trim();
+    if (!key) continue;
+    invBySku.set(key, {
+      sku: r.sku,
+      onHand: Number(r.on_hand || 0),
+      reserved: Number(r.reserved || 0),
+      available: Number(r.available || 0),
+      minStock: Number(r.min_stock ?? 10),
+    });
+  }
+
+  const categorySet = new Set<string>();
+  initialProducts = pgProductsRes.rows.map((p: any) => {
+    const catName = p.category ? String(p.category).trim() : '';
+    if (catName) categorySet.add(catName);
+    const skuKey = p.sku ? String(p.sku).trim().toUpperCase() : '';
+    const inv = skuKey ? invBySku.get(skuKey) : undefined;
+    const price = Number(p.price) || 0;
+    const wholesalePrice = Number(p.wholesale_price) || Math.round(price * (1 - baseDiscountPercent / 100));
+
+    return {
+      id: p.id,
+      name: p.name || 'Sản phẩm LA PET',
+      slug: p.slug || String(p.id),
+      sku: p.sku || '—',
+      price,
+      wholesale_price: wholesalePrice,
+      status: p.status || 'published',
+      sold_quantity: Number(p.sold_quantity) || 0,
+      specification: p.unit || (p.weight ? `${p.weight}g` : '—'),
+      weight: p.weight ? Number(p.weight) : null,
+      category_id: catName || null,
+      category_slug: catName || null,
+      category_name: catName || 'Chưa phân loại',
+      image: p.image_url || null,
+      image_url: resolveImageUrl(p.image_url, p.sku),
+      stock_available: inv ? inv.available : null,
+    };
+  });
+
+  categoriesList = Array.from(categorySet)
+    .sort((a, b) => a.localeCompare(b, 'vi'))
+    .map((name) => ({ id: name, name, slug: name }));
+
+  const salesBySku = new Map<string, { sku: string; productName: string; orderCount: number; qty: number; revenue: number }>();
+  for (const r of skuSalesRes.rows) {
+    const key = String(r.sku_upper || '').trim();
+    if (!key) continue;
+    salesBySku.set(key, {
+      sku: r.sku,
+      productName: r.product_name || r.sku,
+      orderCount: Number(r.order_count || 0),
+      qty: Number(r.total_qty || 0),
+      revenue: Number(r.total_revenue || 0),
+    });
+  }
+
+  if (totalsRes.rows.length > 0) {
+    salesTotals = {
+      totalOrders: Number(totalsRes.rows[0].total_orders || 0),
+      totalUnits: Number(totalsRes.rows[0].total_units || 0),
+      totalRevenue: Number(totalsRes.rows[0].total_revenue || 0),
+    };
+  }
+
+  const productsBySku = new Map<string, any>();
+  for (const p of initialProducts) {
+    if (p.sku && p.sku !== '—') {
+      productsBySku.set(String(p.sku).trim().toUpperCase(), p);
+    }
+  }
+
+  // Top 7 sản phẩm doanh thu cao nhất
+  const topRows = skuSalesRes.rows.slice(0, 7);
+  const top1Revenue = topRows.length > 0 ? Math.max(1, Number(topRows[0].total_revenue || 0)) : 1;
+  topSellingProducts = topRows.map((r: any) => {
+    const skuKey = String(r.sku_upper || '').trim();
+    const inv = invBySku.get(skuKey);
+    const dProd = productsBySku.get(skuKey);
+    const revenue = Number(r.total_revenue || 0);
+    return {
+      sku: r.sku,
+      name: dProd?.name || r.product_name || r.sku,
+      orderCount: Number(r.order_count || 0),
+      qty: Number(r.total_qty || 0),
+      revenue,
+      sharePercent: Math.round((revenue / top1Revenue) * 100),
+      available: inv ? inv.available : null,
+      minStock: inv ? inv.minStock : 10,
+    };
+  });
+
+  // Phân tích theo Ngành hàng (PostgreSQL Products + Sales & Stock)
+  const catAgg = new Map<string, {
+    categoryId: string | number;
+    name: string;
+    totalCount: number;
+    publishedCount: number;
+    wholesaleSum: number;
+    totalStock: number;
+    revenue: number;
+  }>();
+
+  for (const p of initialProducts) {
+    const key = p.category_id ? String(p.category_id) : 'uncategorized';
+    const existing = catAgg.get(key) || {
+      categoryId: p.category_id ?? 'all',
+      name: p.category_name || 'Chưa phân loại',
+      totalCount: 0,
+      publishedCount: 0,
+      wholesaleSum: 0,
+      totalStock: 0,
+      revenue: 0,
+    };
+    const skuKey = p.sku && p.sku !== '—' ? String(p.sku).trim().toUpperCase() : '';
+    const inv = skuKey ? invBySku.get(skuKey) : null;
+    const sale = skuKey ? salesBySku.get(skuKey) : null;
+
+    existing.totalCount += 1;
+    if (p.status === 'published') existing.publishedCount += 1;
+    existing.wholesaleSum += Number(p.wholesale_price || 0);
+    existing.totalStock += inv ? inv.available : 0;
+    existing.revenue += sale ? sale.revenue : 0;
+    catAgg.set(key, existing);
+  }
+
+  categoryStats = Array.from(catAgg.values())
+    .map((c) => ({
+      categoryId: c.categoryId,
+      name: c.name,
+      totalCount: c.totalCount,
+      publishedCount: c.publishedCount,
+      avgWholesalePrice: c.totalCount > 0 ? Math.round(c.wholesaleSum / c.totalCount) : 0,
+      totalStock: c.totalStock,
+      revenue: c.revenue,
+    }))
+    .sort((a, b) => b.revenue - a.revenue || b.totalCount - a.totalCount);
+
+  // Cảnh báo Tồn kho & Đồng bộ kho
+  const lowAndOutAlerts: typeof inventoryAlerts = [];
+  let totalAvailable = 0;
+  let lowStockCount = 0;
+  let outOfStockCount = 0;
+  for (const [skuKey, inv] of invBySku.entries()) {
+    totalAvailable += inv.available;
+    if (inv.available <= 0) {
+      outOfStockCount += 1;
+      lowAndOutAlerts.push({
+        sku: inv.sku,
+        name: productsBySku.get(skuKey)?.name || 'Sản phẩm trong kho PG',
+        onHand: inv.onHand,
+        reserved: inv.reserved,
+        available: inv.available,
+        minStock: inv.minStock,
+        alertType: 'out',
+      });
+    } else if (inv.available <= inv.minStock) {
+      lowStockCount += 1;
+      lowAndOutAlerts.push({
+        sku: inv.sku,
+        name: productsBySku.get(skuKey)?.name || 'Sản phẩm trong kho PG',
+        onHand: inv.onHand,
+        reserved: inv.reserved,
+        available: inv.available,
+        minStock: inv.minStock,
+        alertType: 'low',
+      });
+    }
+  }
+
+  const unlinkedAlerts: typeof inventoryAlerts = [];
+  for (const p of initialProducts) {
+    const skuKey = p.sku && p.sku !== '—' ? String(p.sku).trim().toUpperCase() : '';
+    if (!skuKey || !invBySku.has(skuKey)) {
+      unlinkedAlerts.push({
+        sku: p.sku,
+        name: p.name,
+        onHand: 0,
+        reserved: 0,
+        available: null,
+        minStock: 0,
+        alertType: 'unlinked',
+      });
+    }
+  }
+
+  inventorySummary = {
+    totalSkus: invBySku.size,
+    totalAvailable,
+    lowStockCount,
+    outOfStockCount,
+    unlinkedProductsCount: unlinkedAlerts.length,
+  };
+  inventoryAlerts = [...lowAndOutAlerts, ...unlinkedAlerts].slice(0, 6);
+
+  // Chất lượng Dữ liệu Catalog (PostgreSQL)
+  let wholesaleSum = 0;
+  let discountSum = 0;
+  let discountCount = 0;
+  for (const p of initialProducts) {
+    const skuKey = p.sku && p.sku !== '—' ? String(p.sku).trim().toUpperCase() : '';
+    catalogHealth.total += 1;
+    if (p.image) catalogHealth.withImage += 1;
+    if (p.category_id) catalogHealth.withCategory += 1;
+    if (skuKey && invBySku.has(skuKey)) catalogHealth.withInventory += 1;
+    if (p.wholesale_price > 0 && p.price > 0 && p.wholesale_price < p.price) {
+      catalogHealth.validPricing += 1;
+      discountSum += (1 - p.wholesale_price / p.price) * 100;
+      discountCount += 1;
+    }
+    if (p.status === 'published') catalogHealth.published += 1;
+    else if (p.status === 'draft') catalogHealth.draft += 1;
+    else if (p.status === 'archived') catalogHealth.archived += 1;
+    wholesaleSum += Number(p.wholesale_price || 0);
+  }
+  catalogHealth.avgWholesalePrice = catalogHealth.total > 0 ? Math.round(wholesaleSum / catalogHealth.total) : 0;
+  catalogHealth.avgDiscountPercent = discountCount > 0 ? Math.round(discountSum / discountCount) : baseDiscountPercent;
+} catch (e: any) {
+  errorMsg = e.message || 'Lỗi đọc sản phẩm PostgreSQL';
+}
+---
+
+<AdminLayout title="Quản lý Sản phẩm" activeNav="products">
+  <script is:inline defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
+  <script is:inline define:vars={{ initialProducts, categoriesList, baseDiscountPercent, topSellingProducts, categoryStats, salesTotals }}>
+    window.__ADMIN_PRODUCTS__ = initialProducts || [];
+    window.__ADMIN_CATEGORIES__ = categoriesList || [];
+    window.__BASE_DISCOUNT_PERCENT__ = Number(baseDiscountPercent) || 22;
+    window.__TOP_SELLING_PRODUCTS__ = topSellingProducts || [];
+    window.__CATEGORY_STATS__ = categoryStats || [];
+    window.__SALES_TOTALS__ = salesTotals || { totalOrders: 0, totalUnits: 0, totalRevenue: 0 };
+
+    window.productsManager = function productsManager() {
+      return {
+        products: window.__ADMIN_PRODUCTS__ || [],
+        categories: window.__ADMIN_CATEGORIES__ || [],
+        baseDiscountPercent: window.__BASE_DISCOUNT_PERCENT__ || 22,
+        searchQuery: '',
+        selectedCategory: 'all',
+        selectedStatus: 'all',
+        filterWarning: 'all', // 'all' | 'price' | 'out_of_stock'
+        currentPage: 1,
+        pageSize: 20,
+        showAnalytics: false,
+        editModalOpen: false,
+        editingProduct: {
+          id: null,
+          name: '',
+          sku: '',
+          specification: '',
+          price: 0,
+          wholesale_price: 0,
+          status: 'published',
+        },
+        saving: false,
+        toast: { show: false, message: '', type: 'success' },
+        chartTopMetric: 'revenue', // 'revenue' | 'qty'
+
+        toggleAnalytics() {
+          this.showAnalytics = !this.showAnalytics;
+          if (this.showAnalytics) {
+            this.$nextTick(() => this.renderCharts());
+          }
+        },
+
+        setChartTopMetric(metric) {
+          this.chartTopMetric = metric;
+          this.renderCharts();
+        },
+
+        renderCharts() {
+          const ChartLib = window.Chart;
+          if (!ChartLib) {
+            setTimeout(() => this.renderCharts(), 100);
+            return;
+          }
+          const store = (window.__productCharts = window.__productCharts || {});
+          const self = this;
+          const topList = window.__TOP_SELLING_PRODUCTS__ || [];
+          const catList = (window.__CATEGORY_STATS__ || []).filter(c => c.categoryId !== 'all');
+
+          // 1. Biểu đồ Top sản phẩm (Horizontal Bar Chart)
+          const topCanvas = document.getElementById('topProductsChart');
+          if (topCanvas) {
+            if (store.topProducts) store.topProducts.destroy();
+            const isRev = this.chartTopMetric === 'revenue';
+            const sortedTop = [...topList].sort((a, b) => isRev ? (b.revenue - a.revenue) : (b.qty - a.qty)).slice(0, 7);
+
+            store.topProducts = new ChartLib(topCanvas.getContext('2d'), {
+              type: 'bar',
+              data: {
+                labels: sortedTop.map(it => (it.sku ? '[' + it.sku + '] ' : '') + (it.name.length > 20 ? it.name.slice(0, 18) + '...' : it.name)),
+                datasets: [{
+                  label: isRev ? 'Doanh thu (VNĐ)' : 'Số lượng bán',
+                  data: sortedTop.map(it => isRev ? it.revenue : it.qty),
+                  backgroundColor: isRev ? '#087b80' : '#0d9488',
+                  borderRadius: 6,
+                  barPercentage: 0.65
+                }]
+              },
+              options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                onClick: (_evt, elements) => {
+                  if (!elements.length) return;
+                  const item = sortedTop[elements[0].index];
+                  if (!item) return;
+                  self.searchQuery = item.sku || item.name;
+                  self.currentPage = 1;
+                },
+                scales: {
+                  x: {
+                    beginAtZero: true,
+                    ticks: {
+                      font: { size: 10 },
+                      color: '#64748b',
+                      callback: (val) => {
+                        if (isRev) {
+                          if (val >= 1e9) return (val / 1e9).toFixed(1) + ' tỷ';
+                          if (val >= 1e6) return (val / 1e6).toFixed(0) + ' tr';
+                          return val;
+                        }
+                        return Number(val).toLocaleString('vi-VN');
+                      }
+                    },
+                    grid: { color: '#f1f5f9' }
+                  },
+                  y: {
+                    ticks: { font: { size: 10, weight: '600' }, color: '#1e293b' },
+                    grid: { display: false }
+                  }
+                },
+                plugins: {
+                  legend: { display: false },
+                  tooltip: {
+                    backgroundColor: '#0f172a',
+                    padding: 10,
+                    cornerRadius: 8,
+                    callbacks: {
+                      title: (ctx) => {
+                        const item = sortedTop[ctx[0].index];
+                        return item ? `[${item.sku}] ${item.name}` : '';
+                      },
+                      label: (ctx) => {
+                        const item = sortedTop[ctx.dataIndex];
+                        if (isRev) {
+                          return [
+                            ` Doanh thu: ${new Intl.NumberFormat('vi-VN').format(item.revenue)} ₫`,
+                            ` Đã chốt: ${item.qty.toLocaleString('vi-VN')} sp (${item.orderCount} đơn)`
+                          ];
+                        }
+                        return [
+                          ` Số lượng bán: ${item.qty.toLocaleString('vi-VN')} sp`,
+                          ` Doanh thu: ${new Intl.NumberFormat('vi-VN').format(item.revenue)} ₫`
+                        ];
+                      }
+                    }
+                  }
+                }
+              }
+            });
+          }
+
+          // 2. Biểu đồ Tỷ trọng Doanh thu theo Ngành hàng (Doughnut Chart)
+          const catCanvas = document.getElementById('categoryPieChart');
+          if (catCanvas) {
+            if (store.categoryPie) store.categoryPie.destroy();
+            const validCats = [...catList].sort((a, b) => b.revenue - a.revenue);
+            const palette = [
+              '#087b80', '#0ea5e9', '#3b82f6', '#6366f1', '#8b5cf6',
+              '#ec4899', '#f43f5e', '#f97316', '#eab308', '#10b981', '#64748b'
+            ];
+            const totalCatRev = validCats.reduce((acc, c) => acc + (Number(c.revenue) || 0), 0) || 1;
+
+            store.categoryPie = new ChartLib(catCanvas.getContext('2d'), {
+              type: 'doughnut',
+              data: {
+                labels: validCats.map(c => c.name),
+                datasets: [{
+                  data: validCats.map(c => c.revenue),
+                  backgroundColor: palette.slice(0, validCats.length),
+                  borderColor: '#ffffff',
+                  borderWidth: 2,
+                  hoverOffset: 6
+                }]
+              },
+              options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                cutout: '66%',
+                onClick: (_evt, elements) => {
+                  if (!elements.length) return;
+                  const cat = validCats[elements[0].index];
+                  if (!cat) return;
+                  self.selectedCategory = self.selectedCategory === String(cat.categoryId) ? 'all' : String(cat.categoryId);
+                  self.currentPage = 1;
+                },
+                plugins: {
+                  legend: {
+                    position: 'right',
+                    labels: {
+                      boxWidth: 10,
+                      boxHeight: 10,
+                      font: { size: 10, weight: '500' },
+                      color: '#475569',
+                      padding: 8,
+                      generateLabels: (chart) => {
+                        const original = ChartLib.overrides.doughnut.plugins.legend.labels.generateLabels(chart);
+                        return original.map((item, idx) => {
+                          const c = validCats[idx];
+                          const pct = c ? Math.round((c.revenue / totalCatRev) * 100) : 0;
+                          item.text = `${c.name} (${pct}%)`;
+                          return item;
+                        });
+                      }
+                    }
+                  },
+                  tooltip: {
+                    backgroundColor: '#0f172a',
+                    padding: 10,
+                    cornerRadius: 8,
+                    callbacks: {
+                      label: (ctx) => {
+                        const c = validCats[ctx.dataIndex];
+                        const pct = Math.round((c.revenue / totalCatRev) * 100);
+                        return ` ${new Intl.NumberFormat('vi-VN').format(c.revenue)} ₫ (${pct}%) · ${c.publishedCount} SP`;
+                      }
+                    }
+                  }
+                }
+              }
+            });
+          }
+        },
+
+        showToast(message, type = 'success') {
+          this.toast = { show: true, message, type };
+          setTimeout(() => {
+            this.toast.show = false;
+          }, 4000);
+        },
+
+        get counts() {
+          const list = this.products || [];
+          return {
+            total: list.length,
+            published: list.filter((p) => p.status === 'published').length,
+            draft: list.filter((p) => p.status === 'draft').length,
+            archived: list.filter((p) => p.status === 'archived').length,
+            priceReview: list.filter((p) => !(p.wholesale_price > 0 && p.price > 0 && p.wholesale_price < p.price)).length,
+            outOfStock: list.filter((p) => p.stock_available !== null && p.stock_available <= 0).length,
+          };
+        },
+
+        get filteredProducts() {
+          const q = (this.searchQuery || '').toLowerCase().trim();
+          const cat = this.selectedCategory;
+          const status = this.selectedStatus;
+          const warning = this.filterWarning;
+
+          return (this.products || []).filter((p) => {
+            const matchSearch =
+              !q ||
+              (p.name && p.name.toLowerCase().includes(q)) ||
+              (p.sku && p.sku.toLowerCase().includes(q));
+
+            const matchStatus = status === 'all' || p.status === status;
+
+            const matchCategory =
+              cat === 'all' ||
+              String(p.category_id ?? p.category) === String(cat) ||
+              p.category_slug === cat;
+
+            let matchWarning = true;
+            if (warning === 'price') {
+              matchWarning = !(p.wholesale_price > 0 && p.price > 0 && p.wholesale_price < p.price);
+            } else if (warning === 'out_of_stock') {
+              matchWarning = p.stock_available !== null && p.stock_available <= 0;
+            }
+
+            return matchSearch && matchStatus && matchCategory && matchWarning;
+          });
+        },
+
+        get totalPages() {
+          return Math.max(1, Math.ceil(this.filteredProducts.length / this.pageSize));
+        },
+
+        get paginatedProducts() {
+          const start = (this.currentPage - 1) * this.pageSize;
+          return this.filteredProducts.slice(start, start + this.pageSize);
+        },
+
+        setFilterWarning(type) {
+          this.filterWarning = this.filterWarning === type ? 'all' : type;
+          this.currentPage = 1;
+        },
+
+        goToPage(page) {
+          if (page >= 1 && page <= this.totalPages) {
+            this.currentPage = page;
+          }
+        },
+
+        openEdit(p) {
+          this.editingProduct = {
+            id: p.id,
+            name: p.name,
+            sku: p.sku,
+            specification: p.specification && p.specification !== '—' ? p.specification : '15 que/túi',
+            price: p.price,
+            wholesale_price: p.wholesale_price,
+            status: p.status || 'published',
+          };
+          this.editModalOpen = true;
+        },
+
+        autoCalcWholesale() {
+          const price = Number(this.editingProduct.price) || 0;
+          const ratio = Math.max(0, Math.min(100, Number(this.baseDiscountPercent) || 22)) / 100;
+          this.editingProduct.wholesale_price = Math.round(price * (1 - ratio));
+        },
+
+        async saveEdit() {
+          this.saving = true;
+          try {
+            const res = await fetch('/api/admin/products', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: this.editingProduct.id,
+                name: this.editingProduct.name,
+                specification: this.editingProduct.specification,
+                price: Number(this.editingProduct.price),
+                wholesale_price: Number(this.editingProduct.wholesale_price),
+                status: this.editingProduct.status,
+              }),
+            });
+            const data = await res.json();
+            if (data.success) {
+              const idx = this.products.findIndex((p) => p.id === this.editingProduct.id);
+              if (idx !== -1) {
+                this.products[idx].name = this.editingProduct.name;
+                this.products[idx].specification = this.editingProduct.specification || '—';
+                this.products[idx].price = Number(this.editingProduct.price);
+                this.products[idx].wholesale_price = Number(this.editingProduct.wholesale_price);
+                this.products[idx].status = this.editingProduct.status;
+              }
+              this.editModalOpen = false;
+              this.showToast('Cập nhật sản phẩm thành công!');
+            } else {
+              alert('Lỗi: ' + (data.error || 'Cập nhật thất bại'));
+            }
+          } catch (err) {
+            alert('Lỗi kết nối máy chủ');
+          } finally {
+            this.saving = false;
+          }
+        },
+
+        async quickUpdateStatus(id, newStatus) {
+          try {
+            const res = await fetch('/api/admin/products', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id, status: newStatus }),
+            });
+            const data = await res.json();
+            if (data.success) {
+              const idx = this.products.findIndex((p) => p.id === id);
+              if (idx !== -1) {
+                this.products[idx].status = newStatus;
+              }
+              this.showToast('Đã đổi trạng thái sản phẩm');
+            }
+          } catch (err) {
+            alert('Lỗi khi đổi trạng thái');
+          }
+        },
+
+        formatVnd(num) {
+          return new Intl.NumberFormat('vi-VN').format(num || 0) + ' ₫';
+        },
+      };
+    };
+  </script>
+
+  <div class="space-y-6 pb-12" x-data="productsManager()">
+    <!-- ERROR BANNER (IF ANY) -->
+    {errorMsg && (
+      <div class="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700 text-sm font-semibold flex items-center gap-2">
+        <svg class="w-5 h-5 text-red-600 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <span>{errorMsg}</span>
+      </div>
+    )}
+
+    <!-- 4 COMPACT KPI STAT CARDS -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <!-- Card 1: Catalog Size -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3.5">
+        <div class="w-11 h-11 rounded-xl bg-teal-50 border border-teal-100 flex items-center justify-center text-[#087b80] shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m7.5 4.27 9 5.15"/>
+            <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>
+            <path d="m3.3 7 8.7 5 8.7-5"/>
+            <path d="M12 22V12"/>
+          </svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-semibold text-slate-500">Quy mô Catalog</div>
+          <div class="text-lg font-black text-slate-900 leading-tight mt-0.5">
+            <span x-text="counts.total"></span> Sản phẩm
+          </div>
+          <div class="text-[11px] text-slate-500 mt-0.5 truncate">
+            <strong class="text-emerald-600" x-text="counts.published"></strong> đang bán · <span x-text="counts.draft"></span> nháp
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: Total Revenue -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3.5">
+        <div class="w-11 h-11 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" x2="12" y1="2" y2="22"/>
+            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+          </svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-semibold text-slate-500">Tổng doanh thu</div>
+          <div class="text-lg font-black text-slate-900 leading-tight mt-0.5">
+            {formatCompactVnd(salesTotals.totalRevenue)}
+          </div>
+          <div class="text-[11px] text-slate-500 mt-0.5 truncate">
+            {salesTotals.totalOrders.toLocaleString('vi-VN')} đơn hàng đã chốt
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 3: Stock Status -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3.5">
+        <div class="w-11 h-11 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600 shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/>
+            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+            <path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/>
+            <path d="M2 7h20"/>
+            <path d="M10 12h4"/>
+          </svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-semibold text-slate-500">Tình trạng tồn kho</div>
+          <div class="text-lg font-black text-slate-900 leading-tight mt-0.5">
+            {inventorySummary.totalAvailable.toLocaleString('vi-VN')} <span class="text-xs font-normal text-slate-500">khả dụng</span>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1.5 truncate">
+            <span>{inventorySummary.totalSkus} SKU</span>
+            <template x-if="counts.outOfStock > 0">
+              <button
+                type="button"
+                @click="setFilterWarning('out_of_stock')"
+                class="px-1.5 py-0.2 rounded-full bg-rose-50 text-rose-700 font-bold hover:bg-rose-100 cursor-pointer"
+              >
+                <span x-text="counts.outOfStock"></span> SKU hết
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 4: Catalog Quality / Pricing Review -->
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex items-center gap-3.5">
+        <div class="w-11 h-11 rounded-xl bg-sky-50 border border-sky-100 flex items-center justify-center text-sky-600 shrink-0">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <path d="m21 21-4.3-4.3"/>
+            <path d="M11 8v6"/>
+            <path d="M8 11h6"/>
+          </svg>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-semibold text-slate-500">Chất lượng dữ liệu</div>
+          <div class="text-lg font-black text-slate-900 leading-tight mt-0.5 flex items-center gap-1.5">
+            <template x-if="counts.priceReview > 0">
+              <span class="text-amber-600"><span x-text="counts.priceReview"></span> SKU soát giá</span>
+            </template>
+            <template x-if="counts.priceReview === 0">
+              <span class="text-emerald-600">Đạt chuẩn 100%</span>
+            </template>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-0.5 truncate">
+            <button
+              type="button"
+              @click="setFilterWarning('price')"
+              class="text-[#087b80] font-bold hover:underline cursor-pointer"
+            >
+              Lọc nhanh cảnh báo →
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- COLLAPSIBLE DEEP ANALYTICS REPORT ACCORDION (CHARTS) -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden transition-all">
+      <button
+        type="button"
+        @click="toggleAnalytics()"
+        class="w-full px-5 py-3.5 flex items-center justify-between bg-slate-50/70 hover:bg-slate-100/70 transition-colors cursor-pointer text-left"
+      >
+        <div class="flex items-center gap-2.5">
+          <svg class="w-4 h-4 text-slate-700 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v18h18"/>
+            <path d="M18 17V9"/>
+            <path d="M13 17V5"/>
+            <path d="M8 17v-3"/>
+          </svg>
+          <span class="text-xs font-bold text-slate-800 uppercase tracking-wide">
+            Biểu đồ phân tích hiệu suất (Top bán chạy &amp; Tỷ trọng ngành hàng)
+          </span>
+          <span class="text-[11px] text-slate-400 font-medium hidden sm:inline">
+            (Dữ liệu chốt đơn &amp; liên kết trực quan)
+          </span>
+        </div>
+        <div class="flex items-center gap-2 text-xs font-bold text-[#087b80]">
+          <span x-text="showAnalytics ? 'Thu gọn' : 'Xem biểu đồ'"></span>
+          <span class="transform transition-transform text-xs" :class="showAnalytics ? 'rotate-180' : ''">▼</span>
+        </div>
+      </button>
+
+      <div x-show="showAnalytics" x-cloak style="display: none;" class="p-4 sm:p-5 border-t border-slate-100 space-y-5">
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-5">
+          <!-- Biểu đồ 1: Top Sản phẩm (Horizontal Bar Chart) -->
+          <section class="xl:col-span-7 bg-white rounded-xl border border-slate-200 p-4 sm:p-5 flex flex-col justify-between">
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
+              <div>
+                <h3 class="text-xs font-black text-slate-800 uppercase tracking-wide">Top Sản phẩm Bán chạy</h3>
+                <p class="text-[11px] text-slate-500 mt-0.5">Nhấp vào thanh để tìm nhanh sản phẩm trong danh sách</p>
+              </div>
+
+              <!-- Toggle Metric (Doanh thu / Số lượng) -->
+              <div class="inline-flex rounded-lg bg-slate-100 p-0.5 text-[11px] font-bold shrink-0">
+                <button
+                  type="button"
+                  @click="setChartTopMetric('revenue')"
+                  class="px-2.5 py-1 rounded-md transition-all cursor-pointer"
+                  :class="chartTopMetric === 'revenue' ? 'bg-white text-[#087b80] shadow-2xs' : 'text-slate-500 hover:text-slate-700'"
+                >
+                  Doanh thu
+                </button>
+                <button
+                  type="button"
+                  @click="setChartTopMetric('qty')"
+                  class="px-2.5 py-1 rounded-md transition-all cursor-pointer"
+                  :class="chartTopMetric === 'qty' ? 'bg-white text-[#087b80] shadow-2xs' : 'text-slate-500 hover:text-slate-700'"
+                >
+                  Số lượng bán
+                </button>
+              </div>
+            </div>
+
+            <!-- Canvas Container -->
+            <div class="relative w-full h-[280px] sm:h-[300px] mt-4">
+              <canvas id="topProductsChart"></canvas>
+            </div>
+
+            <div class="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Tổng doanh số: <strong class="text-slate-800">{formatCompactVnd(salesTotals.totalRevenue)}</strong></span>
+              <span>Tổng chốt đơn: <strong class="text-slate-800">{salesTotals.totalOrders} đơn · {salesTotals.totalUnits} sp</strong></span>
+            </div>
+          </section>
+
+          <!-- Biểu đồ 2: Cơ cấu Tỷ trọng theo Ngành hàng (Doughnut Chart) -->
+          <section class="xl:col-span-5 bg-white rounded-xl border border-slate-200 p-4 sm:p-5 flex flex-col justify-between">
+            <div class="flex items-center justify-between gap-2 pb-3 border-b border-slate-100">
+              <div>
+                <h3 class="text-xs font-black text-slate-800 uppercase tracking-wide">Tỷ trọng Doanh thu Ngành hàng</h3>
+                <p class="text-[11px] text-slate-500 mt-0.5">Nhấp vào cung tròn để lọc nhanh danh mục</p>
+              </div>
+
+              <span class="px-2 py-0.5 rounded bg-teal-50 text-[#087b80] font-bold text-[11px] border border-teal-200/70">
+                {categoryStats.filter(c => c.categoryId !== 'all').length} ngành hàng
+              </span>
+            </div>
+
+            <!-- Canvas Container -->
+            <div class="relative w-full h-[280px] sm:h-[300px] mt-4 flex items-center justify-center">
+              <canvas id="categoryPieChart"></canvas>
+            </div>
+
+            <div class="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Chiết khấu sỉ TB: <strong class="text-emerald-700">-{catalogHealth.avgDiscountPercent}%</strong></span>
+              <button
+                type="button"
+                x-show="selectedCategory !== 'all'"
+                @click="selectedCategory = 'all'; currentPage = 1;"
+                class="text-[#087b80] font-bold hover:underline cursor-pointer"
+              >
+                Xóa bộ lọc ngành hàng ✕
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- FILTER & SEARCH TOOLBAR -->
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3.5">
+      <div class="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+        <!-- Search bar -->
+        <div class="relative flex-1">
+          <input
+            type="text"
+            x-model="searchQuery"
+            @input="currentPage = 1"
+            placeholder="Tìm theo tên sản phẩm hoặc mã SKU..."
+            class="w-full pl-10 pr-9 py-2.5 rounded-xl border border-slate-300 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#087b80] focus:border-[#087b80] transition-all"
+          />
+          <span class="absolute left-3.5 top-3 text-slate-400">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+          </span>
+          <button
+            type="button"
+            x-show="searchQuery"
+            @click="searchQuery = ''; currentPage = 1;"
+            class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer font-bold text-sm"
+          >
+            ✕
+          </button>
+        </div>
+
+        <!-- Filter Dropdowns & Quick Alerts -->
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Category Filter -->
+          <div class="relative min-w-[200px]">
+            <select
+              x-model="selectedCategory"
+              @change="currentPage = 1"
+              class="w-full pl-3 pr-8 py-2.5 rounded-xl border border-slate-300 text-sm font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-[#087b80] cursor-pointer appearance-none"
+            >
+              <option value="all">Tất cả ngành hàng</option>
+              <template x-for="cat in categories" :key="cat.id">
+                <option :value="cat.id" x-text="cat.name"></option>
+              </template>
+            </select>
+            <span class="absolute right-3 top-3.5 pointer-events-none text-slate-400 text-xs">▼</span>
+          </div>
+
+          <!-- Quick Warning Pills -->
+          <button
+            type="button"
+            @click="setFilterWarning('price')"
+            :class="filterWarning === 'price' ? 'bg-amber-500 text-white border-amber-600 shadow-xs' : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'"
+            class="px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span>Soát giá</span>
+            <span class="px-1.5 py-0.2 rounded-full text-[10px]" :class="filterWarning === 'price' ? 'bg-white/20 text-white' : 'bg-amber-200/80 text-amber-900'" x-text="counts.priceReview"></span>
+          </button>
+
+          <button
+            type="button"
+            @click="setFilterWarning('out_of_stock')"
+            :class="filterWarning === 'out_of_stock' ? 'bg-rose-600 text-white border-rose-700 shadow-xs' : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'"
+            class="px-3 py-2 rounded-xl text-xs font-bold border transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+            </svg>
+            <span>Hết hàng</span>
+            <span class="px-1.5 py-0.2 rounded-full text-[10px]" :class="filterWarning === 'out_of_stock' ? 'bg-white/20 text-white' : 'bg-rose-200/80 text-rose-900'" x-text="counts.outOfStock"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Status Tabs & Pagination summary -->
+      <div class="flex items-center justify-between border-t border-slate-100 pt-3 flex-wrap gap-2">
+        <div class="flex items-center gap-1.5 p-1 bg-slate-100/80 rounded-xl overflow-x-auto max-w-full">
+          <button
+            type="button"
+            @click="selectedStatus = 'all'; currentPage = 1;"
+            :class="selectedStatus === 'all' ? 'bg-[#083a3c] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
+            class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer"
+          >
+            Tất cả (<span x-text="counts.total"></span>)
+          </button>
+          <button
+            type="button"
+            @click="selectedStatus = 'published'; currentPage = 1;"
+            :class="selectedStatus === 'published' ? 'bg-[#083a3c] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
+            class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer"
+          >
+            Đang bán (<span x-text="counts.published"></span>)
+          </button>
+          <button
+            type="button"
+            @click="selectedStatus = 'draft'; currentPage = 1;"
+            :class="selectedStatus === 'draft' ? 'bg-[#083a3c] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
+            class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer"
+          >
+            Bản nháp (<span x-text="counts.draft"></span>)
+          </button>
+          <button
+            type="button"
+            @click="selectedStatus = 'archived'; currentPage = 1;"
+            :class="selectedStatus === 'archived' ? 'bg-[#083a3c] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'"
+            class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap cursor-pointer"
+          >
+            Lưu trữ (<span x-text="counts.archived"></span>)
+          </button>
+        </div>
+
+        <div class="text-xs text-slate-500 font-medium flex items-center gap-2">
+          <span>Tìm thấy <strong class="text-slate-800" x-text="filteredProducts.length"></strong> sản phẩm</span>
+          <span class="text-slate-300">|</span>
+          <span>Trang <strong class="text-slate-800" x-text="currentPage"></strong> / <span x-text="totalPages"></span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- PRODUCTS TABLE (DESKTOP) -->
+    <div class="hidden lg:block bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-slate-600">
+          <thead class="bg-slate-50/80 text-xs font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100 whitespace-nowrap">
+            <tr>
+              <th class="py-3 px-4">Sản phẩm &amp; SKU</th>
+              <th class="py-3 px-4 w-52">Ngành hàng / Đóng gói</th>
+              <th class="py-3 px-4 text-center w-36">Tồn kho</th>
+              <th class="py-3 px-4 text-right w-36">Giá sỉ B2B</th>
+              <th class="py-3 px-4 text-center w-36">Trạng thái</th>
+              <th class="py-3 px-4 text-center w-20">Thao tác</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <template x-if="paginatedProducts.length === 0">
+              <tr>
+                <td colspan="6" class="py-12 text-center text-slate-400">
+                  <div class="w-12 h-12 mx-auto mb-2 text-slate-300 flex items-center justify-center">
+                    <svg class="w-10 h-10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m7.5 4.27 9 5.15"/>
+                      <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>
+                      <path d="m3.3 7 8.7 5 8.7-5"/>
+                      <path d="M12 22V12"/>
+                    </svg>
+                  </div>
+                  <div class="font-medium text-slate-600">Không tìm thấy sản phẩm nào phù hợp</div>
+                  <div class="text-xs text-slate-400 mt-1">Thử thay đổi từ khóa tìm kiếm hoặc bỏ bớt các bộ lọc</div>
+                </td>
+              </tr>
+            </template>
+
+            <template x-for="p in paginatedProducts" :key="p.id">
+              <tr class="hover:bg-slate-50/80 transition-colors">
+                <!-- 1: PRODUCT INFO (Image 44x44 + Name + SKU) -->
+                <td class="py-3 px-4">
+                  <div class="flex items-center gap-3">
+                    <div class="w-11 h-11 rounded-xl border border-slate-200 bg-white overflow-hidden flex items-center justify-center shrink-0 shadow-2xs">
+                      <img
+                        :src="p.image_url"
+                        :alt="p.name"
+                        class="w-full h-full object-contain p-1"
+                        loading="lazy"
+                        @error="$el.style.display='none'; $el.nextElementSibling.style.display='flex';"
+                      />
+                      <div style="display: none;" class="w-full h-full items-center justify-center text-slate-300 bg-slate-50">
+                        <svg class="w-5 h-5 text-slate-300" viewBox="0 0 24 24" fill="currentColor">
+                          <circle cx="12" cy="14" r="4"/>
+                          <circle cx="6.5" cy="8.5" r="2.5"/>
+                          <circle cx="17.5" cy="8.5" r="2.5"/>
+                          <circle cx="10" cy="4" r="2"/>
+                          <circle cx="14" cy="4" r="2"/>
+                        </svg>
+                      </div>
+                    </div>
+                    <div class="min-w-0 max-w-sm">
+                      <div class="font-bold text-slate-900 text-sm hover:text-[#087b80] transition-colors leading-snug truncate" :title="p.name" x-text="p.name"></div>
+                      <div class="flex items-center gap-2 mt-1">
+                        <button
+                          type="button"
+                          @click="searchQuery = p.sku; currentPage = 1;"
+                          class="font-mono font-bold text-[11px] text-[#087b80] bg-teal-50 hover:bg-teal-100 px-1.5 py-0.5 rounded border border-teal-200/50 cursor-pointer"
+                          x-text="p.sku"
+                          title="Lọc nhanh SKU"
+                        ></button>
+                        <template x-if="!(p.wholesale_price > 0 && p.price > 0 && p.wholesale_price < p.price)">
+                          <span class="px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 text-[10px] font-bold border border-amber-200/60 inline-flex items-center gap-1" title="Giá sỉ chưa hợp lệ">
+                            <svg class="w-2.5 h-2.5 text-amber-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>
+                              <line x1="12" y1="9" x2="12" y2="13"/>
+                              <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                            <span>Soát giá</span>
+                          </span>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                </td>
+
+                <!-- 2: CATEGORY & UNIT -->
+                <td class="py-3 px-4 whitespace-nowrap">
+                  <div class="font-semibold text-xs text-slate-700 truncate" x-text="p.category_name"></div>
+                  <div class="text-[11px] text-slate-400 mt-0.5 truncate" x-text="p.specification"></div>
+                </td>
+
+                <!-- 3: INVENTORY (Number only; Red badge when <= 0) -->
+                <td class="py-3 px-4 text-center whitespace-nowrap">
+                  <template x-if="p.stock_available === null">
+                    <span class="text-xs text-slate-400">—</span>
+                  </template>
+                  <template x-if="p.stock_available !== null && p.stock_available <= 0">
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 font-bold text-xs border border-rose-200/60 whitespace-nowrap">
+                      Hết hàng (0)
+                    </span>
+                  </template>
+                  <template x-if="p.stock_available !== null && p.stock_available > 0">
+                    <span class="font-mono text-xs font-bold text-slate-800" x-text="p.stock_available.toLocaleString('vi-VN')"></span>
+                  </template>
+                </td>
+
+                <!-- 4: WHOLESALE B2B ONLY (#087b80 BOLD) -->
+                <td class="py-3 px-4 text-right whitespace-nowrap">
+                  <span class="font-black text-[#087b80] text-sm" x-text="formatVnd(p.wholesale_price)"></span>
+                </td>
+
+                <!-- 5: STATUS DROPDOWN -->
+                <td class="py-3 px-4 text-center whitespace-nowrap">
+                  <select
+                    :value="p.status || 'published'"
+                    @change="quickUpdateStatus(p.id, $event.target.value)"
+                    :class="{
+                      'bg-emerald-50 text-emerald-700 border-emerald-200': p.status === 'published',
+                      'bg-amber-50 text-amber-700 border-amber-200': p.status === 'draft',
+                      'bg-slate-100 text-slate-600 border-slate-200': p.status === 'archived'
+                    }"
+                    class="text-xs font-bold px-2.5 py-1 rounded-lg border cursor-pointer focus:outline-none transition-colors"
+                  >
+                    <option value="published">Đang bán</option>
+                    <option value="draft">Bản nháp</option>
+                    <option value="archived">Lưu trữ / Ẩn</option>
+                  </select>
+                </td>
+
+                <!-- 6: ACTIONS -->
+                <td class="py-3 px-4 text-center whitespace-nowrap">
+                  <button
+                    type="button"
+                    @click="openEdit(p)"
+                    class="px-2.5 py-1 rounded-lg text-xs font-bold text-[#087b80] bg-teal-50 hover:bg-teal-100 border border-teal-200/60 transition-colors cursor-pointer"
+                  >
+                    Sửa
+                  </button>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- DESKTOP PAGINATION FOOTER -->
+      <div class="p-4 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+        <div class="text-slate-500 font-medium">
+          Hiển thị
+          <strong class="text-slate-800" x-text="filteredProducts.length === 0 ? 0 : (currentPage - 1) * pageSize + 1"></strong>
+          -
+          <strong class="text-slate-800" x-text="Math.min(currentPage * pageSize, filteredProducts.length)"></strong>
+          trong tổng số
+          <strong class="text-slate-800" x-text="filteredProducts.length"></strong> sản phẩm
+        </div>
+
+        <div class="flex items-center gap-2">
+          <!-- Page size selector -->
+          <div class="flex items-center gap-1.5 mr-2">
+            <span class="text-slate-500">Hiển thị:</span>
+            <select
+              x-model.number="pageSize"
+              @change="currentPage = 1"
+              class="px-2 py-1 bg-white border border-slate-200 rounded-lg font-bold text-slate-700 text-xs cursor-pointer focus:outline-none"
+            >
+              <option :value="20">20 / trang</option>
+              <option :value="50">50 / trang</option>
+              <option :value="100">100 / trang</option>
+            </select>
+          </div>
+
+          <!-- Pagination buttons -->
+          <div class="flex items-center gap-1">
+            <button
+              type="button"
+              @click="goToPage(1)"
+              :disabled="currentPage === 1"
+              class="px-2 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 cursor-pointer"
+              title="Trang đầu"
+            >
+              « Đầu
+            </button>
+            <button
+              type="button"
+              @click="goToPage(currentPage - 1)"
+              :disabled="currentPage === 1"
+              class="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 cursor-pointer"
+              title="Trang trước"
+            >
+              ‹
+            </button>
+
+            <span class="px-3 py-1 font-bold text-slate-700 bg-white border border-slate-200 rounded-lg">
+              <span class="text-[#087b80]" x-text="currentPage"></span> / <span x-text="totalPages"></span>
+            </span>
+
+            <button
+              type="button"
+              @click="goToPage(currentPage + 1)"
+              :disabled="currentPage === totalPages"
+              class="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 cursor-pointer"
+              title="Trang sau"
+            >
+              ›
+            </button>
+            <button
+              type="button"
+              @click="goToPage(totalPages)"
+              :disabled="currentPage === totalPages"
+              class="px-2 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-slate-700 cursor-pointer"
+              title="Trang cuối"
+            >
+              Cuối »
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PRODUCTS CARDS (MOBILE RESPONSIVE) -->
+    <div class="block lg:hidden space-y-3">
+      <template x-if="paginatedProducts.length === 0">
+        <div class="bg-white p-8 rounded-2xl border border-slate-200 text-center text-slate-400">
+          Không tìm thấy sản phẩm nào phù hợp
+        </div>
+      </template>
+
+      <template x-for="p in paginatedProducts" :key="p.id">
+        <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+          <div class="flex items-start gap-3">
+            <div class="w-14 h-14 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden flex items-center justify-center shrink-0">
+              <img :src="p.image_url" :alt="p.name" class="w-full h-full object-cover" loading="lazy" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="font-mono font-bold text-xs text-[#087b80] bg-teal-50 px-2 py-0.5 rounded" x-text="p.sku"></span>
+                <span class="text-xs text-slate-500 font-mono" x-text="p.stock_available !== null ? 'Kho: ' + p.stock_available : ''"></span>
+              </div>
+              <h3 class="font-bold text-slate-900 text-sm mt-1 leading-snug truncate" x-text="p.name"></h3>
+              <div class="text-xs text-slate-500 mt-0.5" x-text="p.category_name"></div>
+            </div>
+          </div>
+
+          <div class="pt-2 border-t border-slate-100 text-xs">
+            <span class="text-slate-400 block">Giá sỉ B2B:</span>
+            <strong class="text-[#087b80] font-black text-sm" x-text="formatVnd(p.wholesale_price)"></strong>
+          </div>
+
+          <div class="flex items-center justify-between pt-2 border-t border-slate-100">
+            <select
+              :value="p.status || 'published'"
+              @change="quickUpdateStatus(p.id, $event.target.value)"
+              class="text-xs font-bold px-2 py-1 rounded-lg border border-slate-200 bg-white"
+            >
+              <option value="published">Đang bán</option>
+              <option value="draft">Bản nháp</option>
+              <option value="archived">Lưu trữ</option>
+            </select>
+
+            <button
+              type="button"
+              @click="openEdit(p)"
+              class="px-3 py-1 rounded-lg text-xs font-bold text-white bg-[#087b80] hover:bg-[#066367]"
+            >
+              Chỉnh sửa
+            </button>
+          </div>
+        </div>
+      </template>
+
+      <!-- MOBILE PAGINATION -->
+      <div x-show="totalPages > 1" class="p-3 bg-white rounded-xl border border-slate-200 flex items-center justify-between text-xs">
+        <button
+          type="button"
+          @click="goToPage(currentPage - 1)"
+          :disabled="currentPage === 1"
+          class="px-3 py-1.5 rounded-lg border border-slate-200 font-bold disabled:opacity-40"
+        >
+          ‹ Trước
+        </button>
+        <span class="font-bold text-slate-700">Trang <span class="text-[#087b80]" x-text="currentPage"></span> / <span x-text="totalPages"></span></span>
+        <button
+          type="button"
+          @click="goToPage(currentPage + 1)"
+          :disabled="currentPage === totalPages"
+          class="px-3 py-1.5 rounded-lg border border-slate-200 font-bold disabled:opacity-40"
+        >
+          Sau ›
+        </button>
+      </div>
+    </div>
+
+    <!-- QUICK EDIT MODAL -->
+    <div
+      x-show="editModalOpen"
+      x-cloak
+      style="display: none;"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs"
+      @keydown.escape.window="editModalOpen = false"
+    >
+      <div
+        class="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden transform transition-all"
+        @click.away="editModalOpen = false"
+      >
+        <!-- Modal Header -->
+        <div class="p-5 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-black text-[#083a3c]">Chỉnh sửa nhanh sản phẩm</h2>
+            <p class="text-xs text-slate-500 font-medium">Cập nhật thông tin, giá bán và trạng thái sản phẩm (PostgreSQL)</p>
+          </div>
+          <button
+            type="button"
+            @click="editModalOpen = false"
+            class="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="p-6 space-y-4">
+          <!-- Product Info summary -->
+          <div class="p-3 bg-teal-50/60 rounded-xl border border-teal-100">
+            <div class="font-bold text-slate-900 text-sm" x-text="editingProduct.name"></div>
+            <div class="text-xs text-slate-500 font-mono mt-0.5">SKU: <strong class="text-[#087b80]" x-text="editingProduct.sku"></strong></div>
+          </div>
+
+          <!-- Name & Specification inputs -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                Tên sản phẩm
+              </label>
+              <input
+                type="text"
+                x-model="editingProduct.name"
+                class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+              />
+            </div>
+            <div>
+              <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+                Quy cách đóng gói
+              </label>
+              <input
+                type="text"
+                x-model="editingProduct.specification"
+                placeholder="VD: 15 que/túi - 90g"
+                class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+              />
+            </div>
+          </div>
+
+          <!-- Price MRP input -->
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+              Giá niêm yết (MRP) (VNĐ)
+            </label>
+            <input
+              type="number"
+              x-model.number="editingProduct.price"
+              @input="autoCalcWholesale()"
+              class="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+            <span class="text-[11px] text-slate-400 mt-1 block">Giá bán lẻ tham khảo hiển thị trên website</span>
+          </div>
+
+          <!-- Wholesale price input -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-bold uppercase tracking-wider text-[#087b80]">
+                Giá sỉ đại lý B2B (VNĐ)
+              </label>
+              <button
+                type="button"
+                @click="autoCalcWholesale()"
+                class="text-[11px] font-bold text-[#087b80] hover:underline cursor-pointer"
+              >
+                Tự động tính (-<span x-text="baseDiscountPercent"></span>%)
+              </button>
+            </div>
+            <input
+              type="number"
+              x-model.number="editingProduct.wholesale_price"
+              class="w-full px-4 py-2.5 rounded-xl border border-slate-300 font-bold text-[#087b80] focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            />
+            <span class="text-[11px] text-slate-400 mt-1 block">Giá áp dụng cho các đại lý đã duyệt tài khoản</span>
+          </div>
+
+          <!-- Status selection -->
+          <div>
+            <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+              Trạng thái sản phẩm
+            </label>
+            <div class="grid grid-cols-3 gap-2">
+              <label
+                :class="editingProduct.status === 'published' ? 'border-[#087b80] bg-teal-50 text-[#087b80] font-bold' : 'border-slate-200 text-slate-600'"
+                class="flex items-center justify-center gap-1.5 p-2.5 rounded-xl border text-xs cursor-pointer transition-all text-center"
+              >
+                <input type="radio" value="published" x-model="editingProduct.status" class="sr-only" />
+                <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                <span>Đang bán</span>
+              </label>
+
+              <label
+                :class="editingProduct.status === 'draft' ? 'border-amber-500 bg-amber-50 text-amber-700 font-bold' : 'border-slate-200 text-slate-600'"
+                class="flex items-center justify-center gap-1.5 p-2.5 rounded-xl border text-xs cursor-pointer transition-all text-center"
+              >
+                <input type="radio" value="draft" x-model="editingProduct.status" class="sr-only" />
+                <span class="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
+                <span>Bản nháp</span>
+              </label>
+
+              <label
+                :class="editingProduct.status === 'archived' ? 'border-slate-500 bg-slate-100 text-slate-700 font-bold' : 'border-slate-200 text-slate-600'"
+                class="flex items-center justify-center gap-1.5 p-2.5 rounded-xl border text-xs cursor-pointer transition-all text-center"
+              >
+                <input type="radio" value="archived" x-model="editingProduct.status" class="sr-only" />
+                <svg class="w-3.5 h-3.5 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="20" height="5" x="2" y="3" rx="1"/>
+                  <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/>
+                  <path d="M10 12h4"/>
+                </svg>
+                <span>Lưu trữ</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="p-5 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
+          <button
+            type="button"
+            @click="editModalOpen = false"
+            class="px-4 py-2 rounded-xl text-sm font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
+          >
+            Hủy bỏ
+          </button>
+          <button
+            type="button"
+            @click="saveEdit()"
+            :disabled="saving"
+            class="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-[#087b80] hover:bg-[#066367] transition-all disabled:opacity-60 cursor-pointer shadow-xs"
+          >
+            <span x-text="saving ? 'Đang lưu...' : 'Lưu thay đổi'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- FLOATING TOAST -->
+    <div
+      x-show="toast.show"
+      x-cloak
+      style="display: none;"
+      x-transition:enter="transition ease-out duration-300"
+      x-transition:enter-start="opacity-0 translate-y-2"
+      x-transition:enter-end="opacity-100 translate-y-0"
+      x-transition:leave="transition ease-in duration-200"
+      x-transition:leave-start="opacity-100 translate-y-0"
+      x-transition:leave-end="opacity-0 translate-y-2"
+      class="fixed bottom-6 right-6 z-50 bg-[#083a3c] text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-3 border border-[#0d4f52]"
+    >
+      <svg class="w-5 h-5 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+      <span class="text-sm font-bold" x-text="toast.message"></span>
+    </div>
+  </div>
+</AdminLayout>

@@ -1,0 +1,325 @@
+---
+// src/components/product/ProductFilter.astro
+import Drawer from '../common/Drawer.astro';
+import Badge from '../common/Badge.astro';
+
+export interface FilterGroup {
+  id: number | string;
+  name: string;
+  slug: string;
+  productCount?: number;
+}
+
+export interface Props {
+  groups: FilterGroup[];
+  currentCategory?: string;
+  currentPrice?: string;
+  currentBrand?: string;
+  currentSearch?: string;
+  brands?: string[];
+  totalCount?: number;
+  class?: string;
+}
+
+const {
+  groups = [],
+  currentCategory = 'all',
+  currentPrice = 'all',
+  currentBrand = 'all',
+  currentSearch = '',
+  brands = ['LA PET', 'Lapati', 'LaPet Daily'],
+  totalCount = 0,
+  class: className = '',
+} = Astro.props;
+
+const auth = Astro.locals.auth;
+const isLoggedIn = Boolean(auth?.isAuthenticated);
+
+const priceRanges = [
+  { label: 'Tất cả mức giá', value: 'all' },
+  { label: 'Dưới 50.000đ', value: '0-50000' },
+  { label: '50.000đ - 100.000đ', value: '50000-100000' },
+  { label: '100.000đ - 200.000đ', value: '100000-200000' },
+  { label: 'Trên 200.000đ', value: '200000-up' },
+];
+
+function buildFilterUrl(newParams: { category?: string; price?: string; brand?: string }) {
+  const p = new URLSearchParams();
+  if (currentSearch) p.set('q', currentSearch);
+  
+  const cat = newParams.category !== undefined ? newParams.category : currentCategory;
+  if (cat && cat !== 'all') p.set('category', cat);
+  
+  const pr = newParams.price !== undefined ? newParams.price : currentPrice;
+  if (pr && pr !== 'all') p.set('price', pr);
+  
+  const br = newParams.brand !== undefined ? newParams.brand : currentBrand;
+  if (br && br !== 'all') p.set('brand', br);
+
+  const qs = p.toString();
+  return `/san-pham${qs ? `?${qs}` : ''}`;
+}
+
+const hasActiveFilter = (currentCategory && currentCategory !== 'all') ||
+                        (currentPrice && currentPrice !== 'all') ||
+                        (currentBrand && currentBrand !== 'all') ||
+                        Boolean(currentSearch);
+---
+
+<!-- DESKTOP SIDEBAR -->
+<aside class={`hidden lg:block w-64 shrink-0 bg-white p-5 rounded-2xl border border-brand-border/80 shadow-soft sticky top-24 ${className}`}>
+  <!-- Filter Header -->
+  <div class="flex items-center justify-between pb-3.5 mb-4 border-b border-brand-border/60">
+    <div class="flex items-center gap-2">
+      <svg class="w-4.5 h-4.5 text-brand-primary stroke-current fill-none stroke-2" viewBox="0 0 24 24">
+        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+      </svg>
+      <h3 class="font-bold text-sm text-brand-dark">Bộ lọc sản phẩm</h3>
+    </div>
+    {hasActiveFilter && (
+      <a
+        href={currentSearch ? `/san-pham?q=${encodeURIComponent(currentSearch)}` : '/san-pham'}
+        class="text-xs font-semibold text-brand-primary hover:text-brand-dark hover:underline transition-colors cursor-pointer"
+      >
+        Xóa lọc
+      </a>
+    )}
+  </div>
+
+  <div class="space-y-6">
+    <!-- 1. Categories -->
+    <div>
+      <h4 class="text-xs font-bold uppercase tracking-wider text-brand-muted mb-2.5">
+        Danh mục
+      </h4>
+      <ul class="space-y-1 text-xs sm:text-sm font-medium">
+        <li>
+          <a
+            href={buildFilterUrl({ category: 'all' })}
+            class={`w-full flex items-center justify-between px-3 py-2 rounded-xl transition-all ${
+              currentCategory === 'all'
+                ? 'bg-brand-primary text-white font-bold shadow-soft'
+                : 'text-brand-text hover:bg-brand-surface hover:text-brand-primary'
+            }`}
+          >
+            <span>Tất cả</span>
+            {totalCount > 0 && (
+              <span class={`text-[11px] ${currentCategory === 'all' ? 'text-white/80' : 'text-brand-muted'}`}>
+                ({totalCount})
+              </span>
+            )}
+          </a>
+        </li>
+        {groups.map((group) => {
+          const isSelected = currentCategory === group.slug;
+          return (
+            <li>
+              <a
+                href={buildFilterUrl({ category: group.slug })}
+                class={`w-full flex items-center justify-between px-3 py-2 rounded-xl transition-all ${
+                  isSelected
+                    ? 'bg-brand-primary text-white font-bold shadow-soft'
+                    : 'text-brand-text hover:bg-brand-surface hover:text-brand-primary'
+                }`}
+              >
+                <span class="truncate">{group.name}</span>
+                {group.productCount !== undefined && group.productCount > 0 && (
+                  <span class={`text-[11px] ml-1 shrink-0 ${isSelected ? 'text-white/80' : 'text-brand-muted'}`}>
+                    ({group.productCount})
+                  </span>
+                )}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+
+    <!-- 2. Price Ranges (chỉ hiển thị khi đã đăng nhập) -->
+    {isLoggedIn && (
+      <div class="pt-4 border-t border-brand-border/60">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-brand-muted mb-2.5">
+          Khoảng giá
+        </h4>
+        <ul class="space-y-1 text-xs sm:text-sm font-medium">
+          {priceRanges.map((pRange) => {
+            const isSelected = currentPrice === pRange.value;
+            return (
+              <li>
+                <a
+                  href={buildFilterUrl({ price: pRange.value })}
+                  class={`w-full flex items-center justify-between px-3 py-1.5 rounded-lg transition-all ${
+                    isSelected
+                      ? 'bg-brand-sand text-brand-primary font-bold border border-brand-primary/30'
+                      : 'text-brand-text hover:bg-brand-surface hover:text-brand-primary'
+                  }`}
+                >
+                  <span>{pRange.label}</span>
+                  {isSelected && (
+                    <span class="w-2 h-2 rounded-full bg-brand-primary"></span>
+                  )}
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    )}
+
+    <!-- 3. Brands -->
+    {brands && brands.length > 0 && (
+      <div class="pt-4 border-t border-brand-border/60">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-brand-muted mb-2.5">
+          Thương hiệu
+        </h4>
+        <div class="flex flex-wrap gap-1.5">
+          <a
+            href={buildFilterUrl({ brand: 'all' })}
+            class={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${
+              currentBrand === 'all'
+                ? 'bg-brand-dark text-white font-bold'
+                : 'bg-brand-surface text-brand-text border border-brand-border hover:border-brand-primary'
+            }`}
+          >
+            Tất cả
+          </a>
+          {brands.map((brandName) => {
+            const isSelected = currentBrand === brandName;
+            return (
+              <a
+                href={buildFilterUrl({ brand: brandName })}
+                class={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${
+                  isSelected
+                    ? 'bg-brand-dark text-white font-bold'
+                    : 'bg-brand-surface text-brand-text border border-brand-border hover:border-brand-primary'
+                }`}
+              >
+                {brandName}
+              </a>
+            );
+          })}
+        </div>
+      </div>
+    )}
+  </div>
+</aside>
+
+<!-- MOBILE FILTER DRAWER -->
+<Drawer
+  id="mobile-product-filter-drawer"
+  model="isFilterDrawerOpen"
+  side="left"
+  title="Bộ lọc sản phẩm"
+  width="max-w-xs sm:max-w-sm"
+>
+  <div class="space-y-6">
+    <!-- Active filters indicator & reset -->
+    {hasActiveFilter && (
+      <div class="flex items-center justify-between p-3 bg-brand-sand/60 rounded-xl border border-brand-border/60">
+        <span class="text-xs font-semibold text-brand-dark">Đang áp dụng bộ lọc</span>
+        <a
+          href={currentSearch ? `/san-pham?q=${encodeURIComponent(currentSearch)}` : '/san-pham'}
+          class="text-xs font-bold text-brand-primary hover:underline"
+        >
+          Xóa tất cả
+        </a>
+      </div>
+    )}
+
+    <!-- Mobile Categories -->
+    <div>
+      <h4 class="text-xs font-bold uppercase tracking-wider text-brand-muted mb-2">
+        Danh mục sản phẩm
+      </h4>
+      <div class="space-y-1">
+        <a
+          href={buildFilterUrl({ category: 'all' })}
+          class={`flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium ${
+            currentCategory === 'all'
+              ? 'bg-brand-primary text-white font-bold'
+              : 'text-brand-text hover:bg-brand-surface'
+          }`}
+          @click="isFilterDrawerOpen = false"
+        >
+          <span>Tất cả</span>
+          {totalCount > 0 && <span class="text-xs opacity-80">({totalCount})</span>}
+        </a>
+        {groups.map((group) => (
+          <a
+            href={buildFilterUrl({ category: group.slug })}
+            class={`flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium ${
+              currentCategory === group.slug
+                ? 'bg-brand-primary text-white font-bold'
+                : 'text-brand-text hover:bg-brand-surface'
+            }`}
+            @click="isFilterDrawerOpen = false"
+          >
+            <span class="truncate">{group.name}</span>
+            {group.productCount !== undefined && group.productCount > 0 && (
+              <span class="text-xs text-brand-muted ml-1">({group.productCount})</span>
+            )}
+          </a>
+        ))}
+      </div>
+    </div>
+
+    <!-- Mobile Price Ranges (chỉ hiển thị khi đã đăng nhập) -->
+    {isLoggedIn && (
+      <div class="pt-4 border-t border-brand-border/60">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-brand-muted mb-2">
+          Khoảng giá
+        </h4>
+        <div class="space-y-1">
+          {priceRanges.map((pRange) => (
+            <a
+              href={buildFilterUrl({ price: pRange.value })}
+              class={`flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium ${
+                currentPrice === pRange.value
+                  ? 'bg-brand-sand text-brand-primary font-bold border border-brand-primary/30'
+                  : 'text-brand-text hover:bg-brand-surface'
+              }`}
+              @click="isFilterDrawerOpen = false"
+            >
+              <span>{pRange.label}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    )}
+
+    <!-- Mobile Brands -->
+    {brands && brands.length > 0 && (
+      <div class="pt-4 border-t border-brand-border/60">
+        <h4 class="text-xs font-bold uppercase tracking-wider text-brand-muted mb-2">
+          Thương hiệu
+        </h4>
+        <div class="flex flex-wrap gap-2">
+          <a
+            href={buildFilterUrl({ brand: 'all' })}
+            class={`px-3 py-1.5 text-xs rounded-xl font-medium ${
+              currentBrand === 'all'
+                ? 'bg-brand-dark text-white font-bold'
+                : 'bg-brand-surface text-brand-text border border-brand-border'
+            }`}
+            @click="isFilterDrawerOpen = false"
+          >
+            Tất cả
+          </a>
+          {brands.map((brandName) => (
+            <a
+              href={buildFilterUrl({ brand: brandName })}
+              class={`px-3 py-1.5 text-xs rounded-xl font-medium ${
+                currentBrand === brandName
+                  ? 'bg-brand-dark text-white font-bold'
+                  : 'bg-brand-surface text-brand-text border border-brand-border'
+              }`}
+              @click="isFilterDrawerOpen = false"
+            >
+              {brandName}
+            </a>
+          ))}
+        </div>
+      </div>
+    )}
+  </div>
+</Drawer>

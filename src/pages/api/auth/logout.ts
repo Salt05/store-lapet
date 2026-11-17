@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { AUTH_COOKIE_NAME } from '@/lib/auth';
 
 export const prerender = false;
 
@@ -9,8 +10,10 @@ export const POST: APIRoute = async ({ session, cookies }) => {
     }
 
     // Xóa sạch cookie auth
+    cookies.delete(AUTH_COOKIE_NAME, { path: '/' });
     cookies.delete('partner_id', { path: '/' });
     cookies.delete('partner_name', { path: '/' });
+    cookies.delete('partner_phone', { path: '/' });
     cookies.delete('session_id', { path: '/' });
 
     return new Response(

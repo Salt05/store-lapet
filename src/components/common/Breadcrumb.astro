@@ -1,0 +1,98 @@
+---
+// src/components/common/Breadcrumb.astro
+export interface BreadcrumbItem {
+  label: string;
+  href?: string;
+  current?: boolean;
+}
+
+export interface Props {
+  items: BreadcrumbItem[];
+  class?: string;
+  id?: string;
+  separator?: 'chevron' | 'slash' | 'arrow';
+}
+
+const {
+  items = [],
+  class: className = '',
+  id,
+  separator = 'chevron',
+} = Astro.props;
+---
+
+<nav aria-label="Breadcrumb" id={id} class={`py-2 text-xs sm:text-sm font-sans ${className}`}>
+  <ol
+    class="flex items-center flex-wrap gap-1.5 text-brand-muted"
+    itemscope
+    itemtype="https://schema.org/BreadcrumbList"
+  >
+    <!-- Home Link -->
+    <li
+      class="inline-flex items-center"
+      itemprop="itemListElement"
+      itemscope
+      itemtype="https://schema.org/ListItem"
+    >
+      <a
+        href="/"
+        class="inline-flex items-center gap-1 hover:text-brand-primary text-brand-muted transition-colors"
+        itemprop="item"
+      >
+        <svg class="w-3.5 h-3.5 stroke-current fill-none stroke-2 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+          <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+        <span itemprop="name" class="sr-only sm:not-sr-only">Trang chủ</span>
+      </a>
+      <meta itemprop="position" content="1" />
+    </li>
+
+    {items.map((item, index) => {
+      const isLast = index === items.length - 1 || item.current;
+      const position = index + 2;
+
+      return (
+        <li
+          class="inline-flex items-center gap-1.5"
+          itemprop="itemListElement"
+          itemscope
+          itemtype="https://schema.org/ListItem"
+        >
+          <!-- Separator Icon -->
+          {separator === 'chevron' ? (
+            <svg class="w-3.5 h-3.5 stroke-current fill-none stroke-2 text-brand-border shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+              <polyline points="9 18 15 12 9 6"></polyline>
+            </svg>
+          ) : separator === 'slash' ? (
+            <span class="text-brand-border select-none" aria-hidden="true">/</span>
+          ) : (
+            <svg class="w-3.5 h-3.5 stroke-current fill-none stroke-2 text-brand-border shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          )}
+
+          {isLast || !item.href ? (
+            <span
+              class="font-bold text-brand-dark truncate max-w-[200px] sm:max-w-xs"
+              aria-current="page"
+              itemprop="name"
+            >
+              {item.label}
+            </span>
+          ) : (
+            <a
+              href={item.href}
+              class="hover:text-brand-primary text-brand-muted transition-colors truncate max-w-[150px] sm:max-w-xs"
+              itemprop="item"
+            >
+              <span itemprop="name">{item.label}</span>
+            </a>
+          )}
+          <meta itemprop="position" content={String(position)} />
+        </li>
+      );
+    })}
+  </ol>
+</nav>

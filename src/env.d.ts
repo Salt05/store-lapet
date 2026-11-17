@@ -9,6 +9,13 @@ declare namespace App {
       partnerName: string | null;
       partnerPhone: string | null;
     };
+    adminAuth?: {
+      isAdmin: boolean;
+      adminId: string | null;
+      adminEmail: string | null;
+      adminName: string | null;
+      role: string | null;
+    };
   }
 }
 

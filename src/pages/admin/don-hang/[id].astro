@@ -1,0 +1,1398 @@
+---
+// src/pages/admin/don-hang/[id].astro
+import AdminLayout from '@/layouts/AdminLayout.astro';
+import { orderService } from '@/services/order.service';
+import { query } from '@/lib/db';
+import { 
+  ORDER_STATUS_LABEL, 
+  PAYMENT_STATUS_LABEL,
+  ORDER_STATUS,
+  PAYMENT_STATUS
+} from '@/config/order-constants';
+
+export const prerender = false;
+
+const paramId = Astro.params.id;
+let order: any = null;
+let customer: any = null;
+let historyLogs: any[] = [];
+let paymentRecords: any[] = [];
+let errorMsg = '';
+
+if (!paramId) {
+  return Astro.redirect('/admin/don-hang');
+}
+
+try {
+  order = await orderService.getOrderById(paramId);
+  if (!order) {
+    errorMsg = `Không tìm thấy đơn hàng "${paramId}" trong hệ thống cơ sở dữ liệu.`;
+  } else {
+    // 1. Khách hàng
+    if (order.customer_id) {
+      const cRes = await query(
+        `SELECT id, code, name, phone, email, address, city, tier, cumulative_sales, is_active 
+         FROM customers WHERE id = $1`,
+        [order.customer_id]
+      );
+      if (cRes.rows.length > 0) {
+        customer = cRes.rows[0];
+      }
+    }
+
+    // 2. Lịch sử hoạt động & nhật ký thanh toán
+    const [hRes, pRes] = await Promise.all([
+      orderService.getOrderHistory(order.id),
+      orderService.getOrderPayments(order.id),
+    ]);
+    historyLogs = hRes;
+    paymentRecords = pRes;
+  }
+} catch (e: any) {
+  errorMsg = e.message || 'Lỗi tra cứu đơn hàng từ cơ sở dữ liệu';
+}
+
+const statusMeta = order ? (ORDER_STATUS_LABEL[order.status] || { label: order.status, color: 'bg-slate-100 text-slate-700 border-slate-200', desc: '' }) : null;
+const paymentMeta = order ? (PAYMENT_STATUS_LABEL[order.payment_status] || { label: order.payment_status, color: 'bg-slate-100 text-slate-700 border-slate-200', desc: '' }) : null;
+
+const untaxedAmount = Number(order?.amount_untaxed || 0);
+const discountAmount = Number(order?.amount_discount || 0);
+const totalAmount = Number(order?.amount_total || 0);
+const paidAmount = Number(order?.paid_amount || 0);
+const remainingAmount = Math.max(0, totalAmount - paidAmount);
+
+// Trạng thái công nợ text & màu
+let debtStatusLabel = 'Đã hoàn tất thanh toán';
+let debtStatusColor = 'text-emerald-700 bg-emerald-50 border-emerald-200';
+if (remainingAmount > 0) {
+  if (paidAmount === 0) {
+    debtStatusLabel = 'Chưa thanh toán (Nợ 100%)';
+    debtStatusColor = 'text-rose-700 bg-rose-50 border-rose-200';
+  } else {
+    debtStatusLabel = 'Còn dư nợ';
+    debtStatusColor = 'text-amber-700 bg-amber-50 border-amber-200';
+  }
+}
+
+// Danh sách các bước trong quy trình
+const timelineSteps = [
+  { key: 'draft', label: 'Tạo đơn nháp' },
+  { key: 'confirmed', label: 'Xác nhận đơn' },
+  { key: 'delivered', label: 'Giao hàng' },
+  { key: 'completed', label: 'Hoàn tất' },
+];
+
+const currentStatusIdx = order?.status === 'cancelled' ? -1 : timelineSteps.findIndex(s => s.key === order?.status);
+
+// Dữ liệu ban đầu truyền vào Alpine store
+const initialOrderState = {
+  id: order?.id || paramId,
+  order_code: order?.order_code || paramId,
+  status: order?.status || 'draft',
+  payment_status: order?.payment_status || 'unpaid',
+  paid_amount: paidAmount,
+  total_amount: totalAmount,
+  remaining_amount: remainingAmount,
+  shipping_name: order?.shipping_name || customer?.name || '',
+  shipping_phone: order?.partner_phone || customer?.phone || '',
+  shipping_address: order?.shipping_address || customer?.address || '',
+  notes: order?.notes || '',
+  items: (order?.items || []).map((it: any) => ({
+    id: it.id,
+    product_id: it.product_id,
+    sku: it.sku || '',
+    name: it.product_name || it.name || 'Sản phẩm',
+    quantity: Number(it.quantity || 1),
+    price_unit: Number(it.price_unit || 0),
+    discount_percent: Number(it.discount_percent || 0),
+    price_total: Number(it.price_total || it.price_subtotal || 0),
+    unit: it.unit || 'Cái',
+    image_url: it.image_url || '/images/placeholder-product.svg',
+  })),
+};
+---
+
+<AdminLayout title={`Chi tiết Đơn hàng ${order?.order_code || paramId}`} activeNav="orders">
+  <div 
+    class="max-w-7xl mx-auto space-y-6 pb-16"
+    x-data={`{
+      order: ${JSON.stringify(initialOrderState)},
+      actionLoading: false,
+      toast: { show: false, message: '', type: 'success' },
+
+      showToast(msg, type = 'success') {
+        this.toast.message = msg;
+        this.toast.type = type;
+        this.toast.show = true;
+        setTimeout(() => { this.toast.show = false; }, 3500);
+      },
+
+      // Modal Payment
+      payModalOpen: false,
+      payForm: {
+        amount: ${remainingAmount > 0 ? remainingAmount : 0},
+        method: 'bank_transfer',
+        transactionRef: '',
+        notes: ''
+      },
+
+      // Modal Edit Order
+      editModalOpen: false,
+      editForm: {
+        shipping_name: '',
+        shipping_phone: '',
+        shipping_address: '',
+        notes: '',
+        items: []
+      },
+
+      // Product search in edit modal
+      productSearch: '',
+      availableProducts: [],
+      searchingProducts: false,
+
+      // Modal Preview Product Info
+      previewProduct: null,
+      previewModalOpen: false,
+
+      openPayModal() {
+        this.payForm.amount = this.order.remaining_amount > 0 ? this.order.remaining_amount : 0;
+        this.payForm.method = 'bank_transfer';
+        this.payForm.transactionRef = '';
+        this.payForm.notes = '';
+        this.payModalOpen = true;
+      },
+
+      async submitPayment() {
+        if (this.actionLoading) return;
+        const val = Number(this.payForm.amount);
+        if (isNaN(val) || val <= 0) {
+          this.showToast('Vui lòng nhập số tiền thanh toán hợp lệ (> 0đ)', 'error');
+          return;
+        }
+        if (val > this.order.remaining_amount) {
+          this.showToast('Số tiền không được vượt quá dư nợ còn lại', 'error');
+          return;
+        }
+
+        this.actionLoading = true;
+        try {
+          const res = await fetch('/api/admin/orders/' + this.order.id, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'record_payment',
+              amount: val,
+              payment_method: this.payForm.method,
+              transaction_ref: this.payForm.transactionRef,
+              notes: this.payForm.notes
+            })
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.showToast(data.message || 'Ghi nhận thanh toán thành công!');
+            setTimeout(() => { window.location.reload(); }, 800);
+          } else {
+            this.showToast(data.error || 'Không thể ghi nhận thanh toán', 'error');
+            this.actionLoading = false;
+          }
+        } catch (e) {
+          this.showToast('Lỗi kết nối máy chủ', 'error');
+          this.actionLoading = false;
+        }
+      },
+
+      async changeStatus(newStatus) {
+        if (this.actionLoading) return;
+        const labelMap = {
+          'confirmed': 'Xác nhận đơn bán hàng',
+          'delivered': 'Đánh dấu đã giao hàng',
+          'completed': 'Hoàn tất đơn hàng',
+          'cancelled': 'Hủy đơn hàng'
+        };
+        const actionText = labelMap[newStatus] || newStatus;
+        if (!confirm('Bạn có chắc chắn muốn thực hiện: ' + actionText + '?')) return;
+
+        this.actionLoading = true;
+        try {
+          const res = await fetch('/api/admin/orders/' + this.order.id, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'update_status', status: newStatus })
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.showToast(data.message || 'Cập nhật trạng thái thành công!');
+            setTimeout(() => { window.location.reload(); }, 800);
+          } else {
+            this.showToast(data.error || 'Không thể cập nhật trạng thái', 'error');
+            this.actionLoading = false;
+          }
+        } catch (e) {
+          this.showToast('Lỗi kết nối máy chủ', 'error');
+          this.actionLoading = false;
+        }
+      },
+
+      openEditModal() {
+        this.editForm = {
+          shipping_name: this.order.shipping_name,
+          shipping_phone: this.order.shipping_phone,
+          shipping_address: this.order.shipping_address,
+          notes: this.order.notes,
+          items: JSON.parse(JSON.stringify(this.order.items))
+        };
+        this.editModalOpen = true;
+        this.loadAvailableProducts();
+      },
+
+      async loadAvailableProducts() {
+        if (this.availableProducts.length > 0) return;
+        this.searchingProducts = true;
+        try {
+          const res = await fetch('/api/admin/products?limit=250');
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            this.availableProducts = data;
+          }
+        } catch (e) {
+          console.error(e);
+        } finally {
+          this.searchingProducts = false;
+        }
+      },
+
+      addEditItem(prod) {
+        const exist = this.editForm.items.find(it => it.sku.toUpperCase() === prod.sku.toUpperCase());
+        if (exist) {
+          exist.quantity = Number(exist.quantity) + 1;
+        } else {
+          this.editForm.items.push({
+            id: 0,
+            product_id: prod.id,
+            sku: prod.sku,
+            name: prod.name,
+            quantity: 1,
+            price_unit: Number(prod.wholesale_price || prod.price || 0),
+            discount_percent: 0,
+            price_total: Number(prod.wholesale_price || prod.price || 0),
+            unit: prod.unit || 'Cái',
+            image_url: prod.image_url || '/images/placeholder-product.svg'
+          });
+        }
+        this.showToast('Đã thêm sản phẩm ' + prod.name + ' vào đơn');
+      },
+
+      removeEditItem(idx) {
+        if (this.editForm.items.length <= 1) {
+          this.showToast('Đơn hàng phải có ít nhất 1 sản phẩm', 'error');
+          return;
+        }
+        this.editForm.items.splice(idx, 1);
+      },
+
+      async saveOrderEdit() {
+        if (this.editForm.items.length === 0) {
+          this.showToast('Đơn hàng phải có ít nhất 1 sản phẩm', 'error');
+          return;
+        }
+        for (const it of this.editForm.items) {
+          if (!it.quantity || Number(it.quantity) <= 0) {
+            this.showToast('Số lượng sản phẩm ' + it.name + ' phải lớn hơn 0', 'error');
+            return;
+          }
+        }
+
+        this.actionLoading = true;
+        try {
+          const res = await fetch('/api/admin/orders/' + this.order.id, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'edit_order',
+              shipping_name: this.editForm.shipping_name,
+              shipping_phone: this.editForm.shipping_phone,
+              shipping_address: this.editForm.shipping_address,
+              notes: this.editForm.notes,
+              items: this.editForm.items.map(it => ({
+                id: it.id,
+                product_id: it.product_id,
+                sku: it.sku,
+                quantity: Number(it.quantity)
+              }))
+            })
+          });
+          const data = await res.json();
+          if (data.success) {
+            this.showToast('Đã lưu chỉnh sửa đơn hàng thành công!');
+            setTimeout(() => { window.location.reload(); }, 800);
+          } else {
+            this.showToast(data.error || 'Không thể lưu thay đổi', 'error');
+          }
+        } catch (e) {
+          this.showToast('Lỗi kết nối máy chủ', 'error');
+        } finally {
+          this.actionLoading = false;
+        }
+      },
+
+      viewProductDetail(item) {
+        this.previewProduct = item;
+        this.previewModalOpen = true;
+      },
+
+      copyToClipboard(text, label = 'nội dung') {
+        if (!text) return;
+        navigator.clipboard.writeText(text).then(() => {
+          this.showToast('Đã sao chép ' + label + ' vào bộ nhớ tạm');
+        }).catch(() => {
+          this.showToast('Không thể sao chép', 'error');
+        });
+      }
+    }`}
+  >
+    <!-- TOAST NOTIFICATION -->
+    <div
+      x-show="toast.show"
+      x-transition:enter="transition ease-out duration-200"
+      x-transition:enter-start="opacity-0 translate-y-2"
+      x-transition:enter-end="opacity-100 translate-y-0"
+      x-transition:leave="transition ease-in duration-150"
+      x-transition:leave-start="opacity-100 translate-y-0"
+      x-transition:leave-end="opacity-0 translate-y-2"
+      class="fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm font-semibold"
+      :class="toast.type === 'error' ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-emerald-50 border-emerald-200 text-emerald-800'"
+      style="display: none;"
+    >
+      <template x-if="toast.type === 'error'">
+        <svg class="w-5 h-5 shrink-0 text-rose-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      </template>
+      <template x-if="toast.type !== 'error'">
+        <svg class="w-5 h-5 shrink-0 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+      </template>
+      <span x-text="toast.message"></span>
+    </div>
+
+    <!-- 1. BREADCRUMB & HEADER -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 lg:p-6 space-y-4">
+      <!-- Breadcrumb -->
+      <nav class="flex items-center gap-2 text-xs font-medium text-slate-400">
+        <a href="/admin" class="hover:text-brand-dark transition-colors">Admin</a>
+        <span>/</span>
+        <a href="/admin/don-hang" class="hover:text-brand-dark transition-colors">Đơn hàng B2B</a>
+        <span>/</span>
+        <span class="text-slate-800 font-bold">{order?.order_code || paramId}</span>
+      </nav>
+
+      <!-- Main Header Row -->
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-1">
+        <div class="space-y-2">
+          <div class="flex flex-wrap items-center gap-3">
+            <h1 class="text-2xl sm:text-3xl font-black text-brand-dark tracking-tight font-mono">
+              #{order?.order_code || paramId}
+            </h1>
+            
+            {statusMeta && (
+              <span class={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${statusMeta.color}`}>
+                <span class="w-1.5 h-1.5 rounded-full bg-current"></span>
+                {statusMeta.label}
+              </span>
+            )}
+
+            {paymentMeta && (
+              <span class={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${paymentMeta.color}`}>
+                <span class="w-1.5 h-1.5 rounded-full bg-current"></span>
+                {paymentMeta.label}
+              </span>
+            )}
+          </div>
+
+          <div class="flex flex-wrap items-center gap-4 text-xs text-slate-500">
+            <div class="flex items-center gap-1.5">
+              <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>Tạo lúc: <strong class="text-slate-700 font-mono">{new Date(order?.date_order || order?.created_at).toLocaleString('vi-VN')}</strong></span>
+            </div>
+            {order?.client_order_ref && (
+              <div class="flex items-center gap-1.5">
+                <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span>Mã tham chiếu: <strong class="text-slate-700 font-mono">{order.client_order_ref}</strong></span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <!-- Action Buttons (Hierarchical) -->
+        {order && (
+          <div class="flex flex-wrap items-center gap-2.5">
+            <!-- Secondary: Back to List -->
+            <a
+              href="/admin/don-hang"
+              class="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold text-xs transition-colors"
+            >
+              <svg class="w-4 h-4 text-slate-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+              <span>Danh sách</span>
+            </a>
+
+            <!-- Action: Chỉnh sửa đơn hàng (cho phép khi draft hoặc confirmed) -->
+            {(order.status === 'draft' || order.status === 'confirmed') && (
+              <button
+                @click="openEditModal"
+                :disabled="actionLoading"
+                class="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-800 font-bold text-xs transition-colors cursor-pointer shadow-2xs"
+              >
+                <svg class="w-4 h-4 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                <span>Chỉnh sửa đơn</span>
+              </button>
+            )}
+
+            <!-- Primary 1: Xác nhận đơn (chỉ khi draft) -->
+            {order.status === 'draft' && (
+              <button
+                @click="changeStatus('confirmed')"
+                :disabled="actionLoading"
+                class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+              >
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>Xác nhận đơn</span>
+              </button>
+            )}
+
+            <!-- Primary 2: Giao hàng (khi confirmed) -->
+            {order.status === 'confirmed' && (
+              <button
+                @click="changeStatus('delivered')"
+                :disabled="actionLoading"
+                class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+              >
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="3" width="15" height="13"/><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>
+                <span>Đánh dấu giao hàng</span>
+              </button>
+            )}
+
+            <!-- Primary 3: Hoàn tất đơn (khi delivered và đã paid) -->
+            {order.status === 'delivered' && (
+              <button
+                @click="changeStatus('completed')"
+                :disabled="actionLoading || order.remaining_amount > 0"
+                class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                title={remainingAmount > 0 ? 'Đơn hàng phải thanh toán đủ 100% mới có thể hoàn tất' : 'Chốt hoàn tất đơn hàng'}
+              >
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                <span>Hoàn tất đơn hàng</span>
+              </button>
+            )}
+
+            <!-- Action: Ghi nhận thanh toán -->
+            {order.payment_status !== 'paid' && order.status !== 'cancelled' && (
+              <button
+                @click="openPayModal"
+                :disabled="actionLoading"
+                class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+              >
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+                <span>Ghi nhận thanh toán</span>
+              </button>
+            )}
+
+            <!-- Destructive: Hủy đơn -->
+            {(order.status === 'draft' || order.status === 'confirmed') && (
+              <button
+                @click="changeStatus('cancelled')"
+                :disabled="actionLoading"
+                class="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 font-bold text-xs transition-colors cursor-pointer"
+              >
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                <span>Hủy đơn</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <!-- Order Progress Timeline Stepper -->
+      {order && order.status !== 'cancelled' && (
+        <div class="pt-4 border-t border-slate-100">
+          <div class="grid grid-cols-4 gap-2 text-center text-xs">
+            {timelineSteps.map((step, idx) => {
+              const isPast = idx <= currentStatusIdx;
+              const isCurrent = idx === currentStatusIdx;
+              return (
+                <div class="space-y-1.5">
+                  <div class={`h-1.5 rounded-full transition-all ${isPast ? 'bg-[#087b80]' : 'bg-slate-200'}`}></div>
+                  <div class="flex items-center justify-center gap-1">
+                    <span class={`font-bold ${isCurrent ? 'text-[#087b80]' : isPast ? 'text-slate-800' : 'text-slate-400'}`}>
+                      {step.label}
+                    </span>
+                    {isPast && (
+                      <svg class="w-3.5 h-3.5 text-[#087b80]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+
+    {errorMsg ? (
+      <div class="p-6 bg-red-50 border border-red-200 rounded-2xl text-red-700 font-semibold text-sm flex items-center gap-3">
+        <svg class="w-6 h-6 shrink-0 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>{errorMsg}</span>
+      </div>
+    ) : order ? (
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* LEFT COLUMN (8 COLS): PRODUCT TABLE, FINANCIAL SUMMARY, TIMELINE HISTORY */}
+        <div class="lg:col-span-8 space-y-6">
+          
+          <!-- B. KHU VỰC THÔNG TIN SẢN PHẨM -->
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5 text-[#087b80]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+                <h2 class="font-bold text-slate-800 text-base">
+                  Danh mục sản phẩm đặt hàng ({order.items?.length || 0} mặt hàng)
+                </h2>
+              </div>
+              <span class="text-xs text-slate-500 font-medium">
+                Áp dụng bảng giá sỉ & chiết khấu B2B
+              </span>
+            </div>
+
+            <!-- Table with smooth scrolling if many items -->
+            <div class="overflow-x-auto max-h-[500px] overflow-y-auto divide-y divide-slate-100">
+              <table class="w-full text-left text-sm text-slate-600">
+                <thead class="bg-slate-50/80 sticky top-0 z-10 text-[11px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-200">
+                  <tr>
+                    <th class="py-3 px-4">Sản phẩm</th>
+                    <th class="py-3 px-3 text-center">Số lượng</th>
+                    <th class="py-3 px-3 text-center">ĐVT</th>
+                    <th class="py-3 px-3 text-right">Đơn giá sỉ</th>
+                    <th class="py-3 px-3 text-right">Chiết khấu</th>
+                    <th class="py-3 px-4 text-right">Thành tiền</th>
+                    <th class="py-3 px-3 text-center w-12"></th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  {(order.items || []).map((it: any) => (
+                    <tr class="hover:bg-slate-50/80 transition-colors">
+                      <td class="py-3.5 px-4">
+                        <div class="flex items-center gap-3">
+                          <img
+                            src={it.image_url || '/images/placeholder-product.svg'}
+                            alt={it.product_name || it.name}
+                            class="w-12 h-12 rounded-xl object-cover bg-slate-100 border border-slate-200 shrink-0"
+                            loading="lazy"
+                            onerror="this.src='/images/placeholder-product.svg'"
+                          />
+                          <div>
+                            <div class="font-bold text-slate-900 line-clamp-1 leading-snug">
+                              {it.product_name || it.name}
+                            </div>
+                            <div class="flex items-center gap-2 mt-1">
+                              <span class="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-bold">
+                                SKU: {it.sku || '—'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="py-3.5 px-3 text-center font-bold text-slate-900 font-mono text-sm">
+                        {it.quantity}
+                      </td>
+                      <td class="py-3.5 px-3 text-center text-xs text-slate-600">
+                        {it.unit || 'Cái'}
+                      </td>
+                      <td class="py-3.5 px-3 text-right text-xs font-mono font-medium text-slate-700 whitespace-nowrap">
+                        {new Intl.NumberFormat('vi-VN').format(it.price_unit || 0)} ₫
+                      </td>
+                      <td class="py-3.5 px-3 text-right text-xs font-mono font-bold whitespace-nowrap">
+                        {it.discount_percent > 0 ? (
+                          <span class="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            -{it.discount_percent}%
+                          </span>
+                        ) : (
+                          <span class="text-slate-400">0%</span>
+                        )}
+                      </td>
+                      <td class="py-3.5 px-4 text-right font-black text-slate-900 font-mono whitespace-nowrap text-sm">
+                        {new Intl.NumberFormat('vi-VN').format(it.price_total || it.price_subtotal || 0)} ₫
+                      </td>
+                      <td class="py-3.5 px-3 text-center">
+                        <button
+                          type="button"
+                          @click={`viewProductDetail(${JSON.stringify(it)})`}
+                          class="p-1.5 rounded-lg text-slate-400 hover:text-brand-dark hover:bg-slate-100 transition-colors"
+                          title="Xem chi tiết sản phẩm"
+                        >
+                          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- C. KHU VỰC TỔNG KẾT TÀI CHÍNH & CÔNG NỢ -->
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+                <h2 class="font-bold text-slate-800 text-base">Tổng kết tài chính & Công nợ</h2>
+              </div>
+              <span class={`text-xs font-bold px-3 py-1 rounded-full border ${debtStatusColor}`}>
+                {debtStatusLabel}
+              </span>
+            </div>
+
+            <div class="p-6">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- Cột trái: Chi tiết các khoản tính toán -->
+                <div class="space-y-3 text-xs">
+                  <div class="flex justify-between py-1.5 border-b border-slate-100 text-slate-600">
+                    <span class="font-medium">Tổng tiền hàng (chưa giảm):</span>
+                    <span class="font-bold text-slate-800 font-mono text-sm">
+                      {new Intl.NumberFormat('vi-VN').format(untaxedAmount > 0 ? untaxedAmount : totalAmount)} ₫
+                    </span>
+                  </div>
+
+                  <div class="flex justify-between py-1.5 border-b border-slate-100 text-emerald-700">
+                    <span class="font-medium flex items-center gap-1.5">
+                      <svg class="w-4 h-4 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m19 5 3-3"/><path d="m2 22 3-3"/><path d="M6.3 20.3a2.4 2.4 0 0 0 3.4 0L20.3 9.7a2.4 2.4 0 0 0 0-3.4l-4.6-4.6a2.4 2.4 0 0 0-3.4 0L1.7 12.3a2.4 2.4 0 0 0 0 3.4z"/></svg>
+                      Chiết khấu đại lý:
+                    </span>
+                    <span class="font-bold font-mono text-sm">
+                      -{new Intl.NumberFormat('vi-VN').format(discountAmount)} ₫
+                    </span>
+                  </div>
+
+                  <div class="flex justify-between py-1.5 border-b border-slate-100 text-slate-600">
+                    <span class="font-medium">Phí vận chuyển:</span>
+                    <span class="font-bold text-slate-800 font-mono">0 ₫ (Miễn phí vận chuyển)</span>
+                  </div>
+
+                  <div class="flex justify-between py-1.5 border-b border-slate-100 text-slate-600">
+                    <span class="font-medium">Phụ phí phát sinh:</span>
+                    <span class="font-bold text-slate-800 font-mono">0 ₫</span>
+                  </div>
+                </div>
+
+                <!-- Cột phải: Card tổng giá trị & công nợ -->
+                <div class="bg-slate-50 rounded-xl p-5 border border-slate-200/80 space-y-3.5">
+                  <div class="flex justify-between items-baseline">
+                    <span class="text-xs font-bold text-slate-600 uppercase tracking-wider">Tổng giá trị đơn hàng</span>
+                    <span class="text-xl font-black text-[#087b80] font-mono">
+                      {new Intl.NumberFormat('vi-VN').format(totalAmount)} ₫
+                    </span>
+                  </div>
+
+                  <div class="flex justify-between items-baseline pt-2 border-t border-slate-200 text-emerald-700">
+                    <span class="text-xs font-bold">Tổng tiền đã thanh toán</span>
+                    <span class="text-base font-bold font-mono">
+                      {new Intl.NumberFormat('vi-VN').format(paidAmount)} ₫
+                    </span>
+                  </div>
+
+                  <div class="flex justify-between items-baseline pt-2 border-t border-slate-200 text-rose-700">
+                    <span class="text-xs font-black uppercase tracking-wider">Còn lại phải thu (Dư nợ)</span>
+                    <span class="text-lg font-black font-mono">
+                      {new Intl.NumberFormat('vi-VN').format(remainingAmount)} ₫
+                    </span>
+                  </div>
+
+                  {remainingAmount > 0 && order.status !== 'cancelled' && (
+                    <div class="pt-2">
+                      <button
+                        @click="openPayModal"
+                        class="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-2"
+                      >
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+                        <span>Ghi nhận thanh toán ngay</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <!-- Danh sách lịch sử giao dịch thanh toán nếu có -->
+              {paymentRecords.length > 0 && (
+                <div class="mt-6 pt-5 border-t border-slate-100 space-y-3">
+                  <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <svg class="w-4 h-4 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                    Lịch sử các đợt thanh toán ({paymentRecords.length} giao dịch)
+                  </h4>
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-600">
+                      <thead class="bg-slate-100/70 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200">
+                        <tr>
+                          <th class="py-2 px-3">Thời gian</th>
+                          <th class="py-2 px-3">Số tiền</th>
+                          <th class="py-2 px-3">Phương thức</th>
+                          <th class="py-2 px-3">Mã GD / Tham chiếu</th>
+                          <th class="py-2 px-3">Người ghi nhận</th>
+                          <th class="py-2 px-3">Ghi chú</th>
+                        </tr>
+                      </thead>
+                      <tbody class="divide-y divide-slate-100">
+                        {paymentRecords.map((p: any) => (
+                          <tr class="hover:bg-slate-50">
+                            <td class="py-2 px-3 font-mono text-slate-500 whitespace-nowrap">
+                              {new Date(p.created_at).toLocaleString('vi-VN')}
+                            </td>
+                            <td class="py-2 px-3 font-mono font-bold text-emerald-700 whitespace-nowrap">
+                              +{new Intl.NumberFormat('vi-VN').format(p.amount)} ₫
+                            </td>
+                            <td class="py-2 px-3 uppercase font-semibold text-slate-700">
+                              {p.payment_method}
+                            </td>
+                            <td class="py-2 px-3 font-mono text-slate-600">
+                              {p.transaction_ref || '—'}
+                            </td>
+                            <td class="py-2 px-3 text-slate-600">
+                              {p.performed_by || 'Admin'}
+                            </td>
+                            <td class="py-2 px-3 text-slate-500 italic">
+                              {p.notes || '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <!-- 3. C. LỊCH SỬ XỬ LÝ ĐƠN HÀNG (TIMELINE / AUDIT LOG) -->
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5 text-sky-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                <h2 class="font-bold text-slate-800 text-base">Lịch sử xử lý đơn hàng</h2>
+              </div>
+              <span class="text-xs text-slate-400 font-mono">
+                {historyLogs.length} hoạt động
+              </span>
+            </div>
+
+            <div class="p-6">
+              {historyLogs.length === 0 ? (
+                <div class="text-center py-8 text-slate-400 text-xs">
+                  Chưa có lịch sử hoạt động ghi nhận cho đơn hàng này.
+                </div>
+              ) : (
+                <div class="relative pl-6 border-l-2 border-slate-200 space-y-6">
+                  {historyLogs.map((log: any) => {
+                    let dotColor = 'bg-sky-500';
+                    if (log.action === 'payment_recorded') dotColor = 'bg-emerald-500';
+                    else if (log.action === 'status_change') dotColor = 'bg-violet-500';
+                    else if (log.action === 'order_edit') dotColor = 'bg-amber-500';
+
+                    return (
+                      <div class="relative">
+                        <!-- Dot -->
+                        <span class={`absolute -left-[31px] top-1.5 w-3.5 h-3.5 rounded-full border-2 border-white shadow-xs ${dotColor}`}></span>
+
+                        <div class="space-y-1">
+                          <div class="flex flex-wrap items-center gap-2">
+                            <span class="text-xs font-mono font-bold text-slate-500">
+                              {new Date(log.created_at).toLocaleString('vi-VN')}
+                            </span>
+                            <span class="text-slate-300">•</span>
+                            <span class="text-xs font-bold text-slate-800">
+                              {log.performed_by || 'Hệ thống'}
+                            </span>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 uppercase border border-slate-200">
+                              {log.action}
+                            </span>
+                          </div>
+
+                          <p class="text-xs text-slate-700 leading-relaxed font-medium">
+                            {log.note || 'Cập nhật thông tin đơn hàng'}
+                          </p>
+
+                          {log.new_data && log.action === 'order_edit' && (
+                            <div class="mt-2 text-[11px] bg-slate-50 rounded-lg p-2.5 border border-slate-200 text-slate-600 font-mono">
+                              <div>Tổng tiền sau sửa: <strong>{new Intl.NumberFormat('vi-VN').format(log.new_data.amount_total || 0)} ₫</strong></div>
+                              <div>Số mặt hàng: <strong>{log.new_data.items?.length || 0} sản phẩm</strong></div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN (4 COLS): CUSTOMER / DEALER CARD & DELIVERY & NOTES -->
+        <div class="lg:col-span-4 space-y-6">
+          <!-- CARD D. THÔNG TIN ĐẠI LÝ / KHÁCH HÀNG THỐNG NHẤT -->
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+              <div class="flex items-center gap-2">
+                <svg class="w-5 h-5 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <h3 class="font-bold text-slate-800 text-sm">Thông tin đại lý & Người nhận</h3>
+              </div>
+              {customer?.tier && (
+                <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">
+                  {customer.tier}
+                </span>
+              )}
+            </div>
+
+            <div class="p-5 space-y-4 text-xs">
+              <!-- Đại lý -->
+              <div>
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Đại lý đặt hàng
+                </span>
+                <div class="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 class="text-sm font-bold text-slate-900 leading-snug">
+                      {customer?.name || order.partner_name || 'Đại lý B2B'}
+                    </h4>
+                    {customer?.code && (
+                      <div class="flex items-center gap-1.5 mt-0.5">
+                        <span class="text-[11px] font-mono font-bold text-[#087b80]">
+                          Mã ĐL: {customer.code}
+                        </span>
+                        <button
+                          type="button"
+                          @click={`copyToClipboard('${customer.code}', 'mã đại lý')`}
+                          class="text-slate-400 hover:text-slate-600 transition-colors"
+                          title="Sao chép mã"
+                        >
+                          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Hotline / Phone -->
+              <div class="pt-3 border-t border-slate-100">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Số điện thoại
+                </span>
+                <div class="flex items-center justify-between">
+                  <a
+                    href={`tel:${order.partner_phone || customer?.phone || ''}`}
+                    class="font-mono font-bold text-slate-800 hover:text-[#087b80] flex items-center gap-1.5 transition-colors"
+                  >
+                    <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                    <span>{order.partner_phone || customer?.phone || 'Chưa có SĐT'}</span>
+                  </a>
+                  {order.partner_phone || customer?.phone ? (
+                    <button
+                      type="button"
+                      @click={`copyToClipboard('${order.partner_phone || customer?.phone}', 'số điện thoại')`}
+                      class="text-slate-400 hover:text-slate-600 transition-colors"
+                      title="Sao chép SĐT"
+                    >
+                      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <!-- Email -->
+              {(order.partner_email || customer?.email) && (
+                <div class="pt-3 border-t border-slate-100">
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Email nhận chứng từ
+                  </span>
+                  <div class="flex items-center justify-between">
+                    <a
+                      href={`mailto:${order.partner_email || customer?.email}`}
+                      class="text-slate-700 hover:text-[#087b80] flex items-center gap-1.5 transition-colors truncate max-w-[220px]"
+                    >
+                      <svg class="w-3.5 h-3.5 text-slate-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                      <span class="truncate">{order.partner_email || customer?.email}</span>
+                    </a>
+                    <button
+                      type="button"
+                      @click={`copyToClipboard('${order.partner_email || customer?.email}', 'email')`}
+                      class="text-slate-400 hover:text-slate-600 transition-colors"
+                      title="Sao chép Email"
+                    >
+                      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <!-- Người nhận nếu khác người đặt -->
+              {order.shipping_name && order.shipping_name !== customer?.name && (
+                <div class="pt-3 border-t border-slate-100">
+                  <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Người nhận chỉ định
+                  </span>
+                  <p class="font-bold text-slate-800">{order.shipping_name}</p>
+                </div>
+              )}
+
+              <!-- Địa chỉ nhận hàng -->
+              <div class="pt-3 border-t border-slate-100">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Địa chỉ giao nhận hàng
+                </span>
+                <div class="flex items-start justify-between gap-2">
+                  <p class="text-slate-700 leading-relaxed font-medium">
+                    {order.shipping_address || customer?.address || 'Tại kho LA PET'}
+                  </p>
+                  {(order.shipping_address || customer?.address) && (
+                    <button
+                      type="button"
+                      @click={`copyToClipboard('${order.shipping_address || customer?.address}', 'địa chỉ')`}
+                      class="text-slate-400 hover:text-slate-600 transition-colors shrink-0 mt-0.5"
+                      title="Sao chép địa chỉ"
+                    >
+                      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <!-- Phương thức thanh toán -->
+              <div class="pt-3 border-t border-slate-100">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                  Phương thức thanh toán
+                </span>
+                <div class="flex items-center gap-1.5 font-bold text-slate-800 uppercase font-mono">
+                  <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+                  <span>{order.payment_method === 'bank_transfer' ? 'Chuyển khoản ngân hàng' : order.payment_method}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- GHI CHÚ ĐƠN HÀNG -->
+          <div class="bg-white rounded-2xl border border-slate-200 shadow-xs p-5 space-y-3">
+            <h3 class="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+              <svg class="w-4 h-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              Ghi chú giao hàng & đơn
+            </h3>
+            {order.notes ? (
+              <p class="text-xs text-slate-700 whitespace-pre-line leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-200/60">
+                {order.notes}
+              </p>
+            ) : (
+              <p class="text-xs text-slate-400 italic">Không có ghi chú nào cho đơn hàng này.</p>
+            )}
+          </div>
+        </div>
+      </div>
+    ) : null}
+
+    <!-- ==================== MODAL GHI NHẬN THANH TOÁN ==================== -->
+    <div
+      x-show="payModalOpen"
+      x-transition:enter="transition ease-out duration-200"
+      x-transition:enter-start="opacity-0"
+      x-transition:enter-end="opacity-100"
+      x-transition:leave="transition ease-in duration-150"
+      x-transition:leave-start="opacity-100"
+      x-transition:leave-end="opacity-0"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-2xs"
+      style="display: none;"
+    >
+      <div 
+        class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5" 
+        @click.away="payModalOpen = false"
+      >
+        <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+            </div>
+            <div>
+              <h3 class="font-bold text-slate-900 text-base">Ghi nhận thanh toán</h3>
+              <p class="text-[11px] text-slate-400 font-mono">Đơn #{order?.order_code || paramId}</p>
+            </div>
+          </div>
+          <button @click="payModalOpen = false" class="text-slate-400 hover:text-slate-600 font-bold p-1">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <div class="space-y-3.5 text-xs">
+          <!-- Summary box -->
+          <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-2">
+            <div class="flex justify-between text-slate-600">
+              <span>Tổng tiền đơn hàng:</span>
+              <span class="font-bold text-slate-800 font-mono" x-text="new Intl.NumberFormat('vi-VN').format(order.total_amount) + ' ₫'"></span>
+            </div>
+            <div class="flex justify-between text-emerald-700">
+              <span>Đã thanh toán trước đó:</span>
+              <span class="font-bold font-mono" x-text="new Intl.NumberFormat('vi-VN').format(order.paid_amount) + ' ₫'"></span>
+            </div>
+            <div class="flex justify-between text-rose-700 font-black border-t border-slate-200 pt-1.5">
+              <span>Dư nợ còn lại phải thu:</span>
+              <span class="font-mono text-sm" x-text="new Intl.NumberFormat('vi-VN').format(order.remaining_amount) + ' ₫'"></span>
+            </div>
+          </div>
+
+          <!-- Input fields -->
+          <div>
+            <label class="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Số tiền đại lý thanh toán (VNĐ) *
+            </label>
+            <input
+              type="number"
+              x-model.number="payForm.amount"
+              min="1000"
+              :max="order.remaining_amount"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+              placeholder="Nhập số tiền..."
+            />
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Phương thức thanh toán *
+            </label>
+            <select
+              x-model="payForm.method"
+              class="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+            >
+              <option value="bank_transfer">Chuyển khoản ngân hàng (Bank Transfer)</option>
+              <option value="cash">Tiền mặt (Cash)</option>
+              <option value="vnpay">Cổng VNPay</option>
+              <option value="cod">Thu hộ (COD)</option>
+            </select>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Mã giao dịch / Mã tham chiếu
+            </label>
+            <input
+              type="text"
+              x-model="payForm.transactionRef"
+              class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+              placeholder="VD: FT24111300923..."
+            />
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Ghi chú giao dịch
+            </label>
+            <textarea
+              x-model="payForm.notes"
+              rows="2"
+              class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+              placeholder="VD: Đại lý thanh toán đợt 1 qua Vietcombank..."
+            ></textarea>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2.5 pt-2 border-t border-slate-100">
+          <button
+            type="button"
+            @click="payModalOpen = false"
+            class="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50"
+          >
+            Hủy
+          </button>
+          <button
+            type="button"
+            @click="submitPayment"
+            :disabled="actionLoading"
+            class="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors shadow-xs flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <template x-if="actionLoading">
+              <svg class="animate-spin w-4 h-4 text-white" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
+            </template>
+            <span x-text="actionLoading ? 'Đang xử lý...' : 'Xác nhận giao dịch'"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== MODAL CHỈNH SỬA ĐƠN HÀNG (EDIT ORDER) ==================== -->
+    <div
+      x-show="editModalOpen"
+      x-transition:enter="transition ease-out duration-200"
+      x-transition:enter-start="opacity-0"
+      x-transition:enter-end="opacity-100"
+      x-transition:leave="transition ease-in duration-150"
+      x-transition:leave-start="opacity-100"
+      x-transition:leave-end="opacity-0"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-2xs"
+      style="display: none;"
+    >
+      <div 
+        class="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl" 
+        @click.away="editModalOpen = false"
+      >
+        <!-- Modal Header -->
+        <div class="p-5 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center font-bold">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </div>
+            <div>
+              <h3 class="font-bold text-slate-900 text-base">Chỉnh sửa thông tin đơn hàng #{order?.order_code || paramId}</h3>
+              <p class="text-[11px] text-slate-400">Tự động tính lại chiết khấu & giữ chỗ kho</p>
+            </div>
+          </div>
+          <button @click="editModalOpen = false" class="text-slate-400 hover:text-slate-600 font-bold p-1">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+
+        <!-- Modal Body (Scrollable) -->
+        <div class="p-6 overflow-y-auto space-y-6 flex-1 text-xs">
+          <!-- 1. Thông tin giao nhận -->
+          <div class="space-y-3">
+            <h4 class="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
+              1. Thông tin người nhận & Địa chỉ giao hàng
+            </h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block font-semibold text-slate-600 mb-1">Tên người nhận</label>
+                <input
+                  type="text"
+                  x-model="editForm.shipping_name"
+                  class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+                  placeholder="Tên người nhận..."
+                />
+              </div>
+              <div>
+                <label class="block font-semibold text-slate-600 mb-1">Số điện thoại</label>
+                <input
+                  type="text"
+                  x-model="editForm.shipping_phone"
+                  class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+                  placeholder="Số điện thoại..."
+                />
+              </div>
+              <div class="sm:col-span-2">
+                <label class="block font-semibold text-slate-600 mb-1">Địa chỉ giao hàng</label>
+                <input
+                  type="text"
+                  x-model="editForm.shipping_address"
+                  class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+                  placeholder="Địa chỉ giao hàng chi tiết..."
+                />
+              </div>
+              <div class="sm:col-span-2">
+                <label class="block font-semibold text-slate-600 mb-1">Ghi chú đơn hàng</label>
+                <textarea
+                  x-model="editForm.notes"
+                  rows="2"
+                  class="w-full px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+                  placeholder="Ghi chú giao hàng..."
+                ></textarea>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. Danh mục sản phẩm & Thêm mới -->
+          <div class="space-y-3 pt-4 border-t border-slate-100">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h4 class="font-bold text-slate-800 uppercase tracking-wider text-[11px]">
+                2. Sản phẩm trong đơn hàng (<span x-text="editForm.items.length"></span> mặt hàng)
+              </h4>
+            </div>
+
+            <!-- Items Table in Editor -->
+            <div class="border border-slate-200 rounded-xl overflow-hidden">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 text-[10px] font-bold text-slate-500 uppercase border-b border-slate-200">
+                  <tr>
+                    <th class="py-2.5 px-3">Sản phẩm</th>
+                    <th class="py-2.5 px-2 text-center w-28">Số lượng</th>
+                    <th class="py-2.5 px-3 text-right">Đơn giá sỉ</th>
+                    <th class="py-2.5 px-3 text-center w-12">Xóa</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  <template x-for="(it, idx) in editForm.items" :key="it.sku">
+                    <tr class="hover:bg-slate-50">
+                      <td class="py-2.5 px-3">
+                        <div class="font-bold text-slate-800" x-text="it.name"></div>
+                        <div class="text-[10px] text-slate-400 font-mono" x-text="'SKU: ' + it.sku"></div>
+                      </td>
+                      <td class="py-2.5 px-2 text-center">
+                        <div class="flex items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            @click="if (it.quantity > 1) it.quantity--"
+                            class="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold"
+                          >-</button>
+                          <input
+                            type="number"
+                            x-model.number="it.quantity"
+                            min="1"
+                            class="w-12 text-center py-1 rounded border border-slate-300 font-mono font-bold"
+                          />
+                          <button
+                            type="button"
+                            @click="it.quantity++"
+                            class="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold"
+                          >+</button>
+                        </div>
+                      </td>
+                      <td class="py-2.5 px-3 text-right font-mono text-slate-700 whitespace-nowrap" x-text="new Intl.NumberFormat('vi-VN').format(it.price_unit) + ' ₫'"></td>
+                      <td class="py-2.5 px-3 text-center">
+                        <button
+                          type="button"
+                          @click="removeEditItem(idx)"
+                          class="text-rose-500 hover:text-rose-700 p-1"
+                          title="Xóa mặt hàng này"
+                        >
+                          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Quick Add Product search -->
+            <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
+              <label class="block font-bold text-slate-700 text-[11px] uppercase tracking-wider">
+                Thêm sản phẩm mới vào đơn
+              </label>
+              <div class="relative">
+                <input
+                  type="text"
+                  x-model="productSearch"
+                  placeholder="Gõ tên sản phẩm hoặc mã SKU để tìm..."
+                  class="w-full px-3.5 py-2 pl-9 rounded-xl border border-slate-300 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#087b80]"
+                />
+                <svg class="w-4 h-4 text-slate-400 absolute left-3 top-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </div>
+
+              <!-- Search suggestions dropdown / list -->
+              <div
+                x-show="productSearch.trim().length > 1"
+                class="max-h-48 overflow-y-auto divide-y divide-slate-100 bg-white rounded-xl border border-slate-200 shadow-sm"
+              >
+                <template x-for="p in availableProducts.filter(item => item.name.toLowerCase().includes(productSearch.toLowerCase()) || item.sku.toLowerCase().includes(productSearch.toLowerCase())).slice(0, 8)" :key="p.id">
+                  <div class="p-2.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                    <div>
+                      <div class="font-bold text-slate-800" x-text="p.name"></div>
+                      <div class="text-[10px] text-slate-400 font-mono" x-text="'SKU: ' + p.sku + ' | Giá sỉ: ' + new Intl.NumberFormat('vi-VN').format(p.wholesale_price) + ' ₫'"></div>
+                    </div>
+                    <button
+                      type="button"
+                      @click="addEditItem(p); productSearch = '';"
+                      class="px-2.5 py-1 rounded bg-[#087b80] hover:bg-[#066569] text-white font-bold text-[11px]"
+                    >
+                      + Thêm
+                    </button>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="p-4 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
+          <span class="text-xs text-slate-500">
+            * Sau khi lưu, toàn bộ chiết khấu và tồn kho sẽ được tính lại tự động.
+          </span>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              @click="editModalOpen = false"
+              class="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-50"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              @click="saveOrderEdit"
+              :disabled="actionLoading"
+              class="px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-xs transition-colors flex items-center gap-1.5"
+            >
+              <span x-show="!actionLoading">Lưu thay đổi</span>
+              <span x-show="actionLoading">Đang tính toán & lưu...</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== MODAL XEM CHI TIẾT SẢN PHẨM ==================== -->
+    <div
+      x-show="previewModalOpen"
+      x-transition:enter="transition ease-out duration-150"
+      x-transition:enter-start="opacity-0"
+      x-transition:enter-end="opacity-100"
+      x-transition:leave="transition ease-in duration-100"
+      x-transition:leave-start="opacity-100"
+      x-transition:leave-end="opacity-0"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-2xs"
+      style="display: none;"
+    >
+      <div 
+        class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4" 
+        @click.away="previewModalOpen = false"
+      >
+        <template x-if="previewProduct">
+          <div class="space-y-4">
+            <div class="flex justify-between items-start">
+              <h3 class="font-bold text-slate-900 text-base" x-text="previewProduct.name || previewProduct.product_name"></h3>
+              <button @click="previewModalOpen = false" class="text-slate-400 hover:text-slate-600 font-bold p-1">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+
+            <div class="aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-200 flex items-center justify-center">
+              <img
+                :src="previewProduct.image_url || '/images/placeholder-product.svg'"
+                class="w-full h-full object-cover"
+                onerror="this.src='/images/placeholder-product.svg'"
+              />
+            </div>
+
+            <div class="space-y-2 text-xs">
+              <div class="flex justify-between border-b border-slate-100 py-1 text-slate-600">
+                <span>Mã SKU:</span>
+                <span class="font-mono font-bold text-slate-900" x-text="previewProduct.sku"></span>
+              </div>
+              <div class="flex justify-between border-b border-slate-100 py-1 text-slate-600">
+                <span>Số lượng đặt:</span>
+                <span class="font-mono font-bold text-slate-900" x-text="previewProduct.quantity + ' ' + (previewProduct.unit || 'Cái')"></span>
+              </div>
+              <div class="flex justify-between border-b border-slate-100 py-1 text-slate-600">
+                <span>Đơn giá sỉ:</span>
+                <span class="font-mono font-bold text-slate-900" x-text="new Intl.NumberFormat('vi-VN').format(previewProduct.price_unit) + ' ₫'"></span>
+              </div>
+              <div class="flex justify-between border-b border-slate-100 py-1 text-slate-600">
+                <span>Chiết khấu:</span>
+                <span class="font-mono font-bold text-emerald-600" x-text="previewProduct.discount_percent + '%'"></span>
+              </div>
+              <div class="flex justify-between pt-1 text-sm font-black text-slate-900">
+                <span>Thành tiền:</span>
+                <span class="font-mono text-[#087b80]" x-text="new Intl.NumberFormat('vi-VN').format(previewProduct.price_total || previewProduct.price_subtotal) + ' ₫'"></span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              @click="previewModalOpen = false"
+              class="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs"
+            >
+              Đóng
+            </button>
+          </div>
+        </template>
+      </div>
+    </div>
+
+  </div>
+</AdminLayout>

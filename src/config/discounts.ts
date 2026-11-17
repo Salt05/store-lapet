@@ -17,21 +17,5 @@ export const DISCOUNT_CONFIG = {
   baseDiscountPercent: 22, 
 
   // Danh mục áp dụng chiết khấu bậc thang theo tháng / chương trình ngắn hạn
-  categoryPolicies: [
-    {
-      categoryId: 'xuong-gam', // Mã danh mục xương gặm
-      categoryName: 'Xương Gặm',
-      active: true,
-      tiers: [
-        { minAmount: 3_000_000, discountPercent: 4 },
-        { minAmount: 5_000_000, discountPercent: 5 },
-        { minAmount: 8_000_000, discountPercent: 7 },
-        { minAmount: 12_000_000, discountPercent: 6 },
-        { minAmount: 20_000_000, discountPercent: 8 },
-        { minAmount: 40_000_000, discountPercent: 9 },
-        { minAmount: 60_000_000, discountPercent: 10 },
-        { minAmount: 100_000_000, discountPercent: 13 }
-      ]
-    }
-  ] as CategoryPolicy[]
+  categoryPolicies: [] as CategoryPolicy[]
 };

@@ -2,620 +2,575 @@
 // src/pages/index.astro
 export const prerender = false;
 
-import Header from '../components/Header.astro';
-import Footer from '../components/Footer.astro';
-import '../styles/global.css';
+import BaseLayout from '../layouts/BaseLayout.astro';
+import ProductCard from '../components/product/ProductCard.astro';
+import { getProductGroups, getShowcaseProducts, assetUrl, formatVnd } from '../lib/catalog';
 
-// 1. IN TEST P0 AUTH STATE RA TERMINAL
-console.log('=== P0 AUTH STATE ===', Astro.locals.auth);
+// 1. Tải danh mục và sản phẩm từ Directus
+const [rawProductGroups, rawShowcaseProducts] = await Promise.all([
+  getProductGroups({ includeEmpty: true }),
+  getShowcaseProducts(24)
+]);
 
-// Lấy thông tin từ P0 Auth State chuẩn (KHÔNG dùng Astro.cookies nữa)
-const { isAuthenticated, isDealer, partnerId } = Astro.locals.auth;
-
-// 2. Sử dụng biến môi trường Directus
-const DIRECTUS_URL =
-  import.meta.env.PUBLIC_DIRECTUS_URL ||
-  "http://192.168.1.110:8055";
-
-// 3. Tải dữ liệu an toàn từ Directus
-let allProducts = [];
-try {
-  const res = await fetch(
-    `${DIRECTUS_URL}/items/products?fields=*,odoo_id,sku,wholesale_price,price,category.name,category.slug,group.name,group.slug,images.*,images.directus_files_id.*`
-  );
-  if (res.ok) {
-    const json = await res.json();
-    allProducts = json.data || [];
-  } else {
-    console.error(`⚠️ Directus trả về lỗi HTTP: ${res.status}`);
+// 2. Dữ liệu sản phẩm dự phòng chuẩn LA PET khi Directus chưa sẵn sàng
+const fallbackProducts = [
+  {
+    id: 106,
+    odoo_id: 3311,
+    sku: 'E01',
+    name: 'Xương bàn chải hương sữa',
+    slug: 'xuong-ban-chai-huong-sua',
+    price: 19500,
+    wholesale_price: 15210,
+    image: '/e01.webp',
+    sold_quantity: 60283,
+  },
+  {
+    id: 107,
+    odoo_id: 3312,
+    sku: 'E02',
+    name: 'Xương bàn chải hương phô mai',
+    slug: 'xuong-ban-chai-huong-pho-mai',
+    price: 19500,
+    wholesale_price: 15210,
+    image: '/e02.webp',
+    sold_quantity: 49696,
+  },
+  {
+    id: 108,
+    odoo_id: 3314,
+    sku: 'E03',
+    name: 'Xương bàn chải thịt gà thịt hươu',
+    slug: 'xuong-ban-chai-thit-ga-thit-huou',
+    price: 19500,
+    wholesale_price: 15210,
+    image: '/e03.webp',
+    sold_quantity: 53522,
+  },
+  {
+    id: 104,
+    odoo_id: 3245,
+    sku: 'B03',
+    name: 'Que gặm sạch răng hương sữa',
+    slug: 'que-gam-sach-rang-huong-sua',
+    price: 23400,
+    wholesale_price: 18252,
+    image: '/b03.webp',
+    sold_quantity: 7165,
+  },
+  {
+    id: 105,
+    odoo_id: 3246,
+    sku: 'B06',
+    name: 'Que gặm sạch răng hương phô mai',
+    slug: 'que-gam-sach-rang-huong-pho-mai',
+    price: 23400,
+    wholesale_price: 18252,
+    image: '/b06.webp',
+    sold_quantity: 4968,
+  },
+  {
+    id: 111,
+    odoo_id: 3288,
+    sku: 'C24',
+    name: 'Que gặm da heo quấn gà',
+    slug: 'que-gam-da-heo-quan-ga',
+    price: 35100,
+    wholesale_price: 27378,
+    image: '/c24.webp',
+    sold_quantity: 8293,
+  },
+  {
+    id: 109,
+    odoo_id: 3306,
+    sku: 'D02',
+    name: 'Xương nhai vị gà',
+    slug: 'xuong-nhai-vi-ga',
+    price: 27300,
+    wholesale_price: 21294,
+    image: '/d02.webp',
+    sold_quantity: 6895,
+  },
+  {
+    id: 110,
+    odoo_id: 3307,
+    sku: 'D03',
+    name: 'Gấp đôi que nhai vị gà',
+    slug: 'gap-doi-que-nhai-vi-ga',
+    price: 31200,
+    wholesale_price: 24336,
+    image: '/d03.webp',
+    sold_quantity: 7081,
+  },
+  {
+    id: 112,
+    odoo_id: 3290,
+    sku: 'ZC',
+    name: 'Cát đậu nành hữu cơ xả bồn cầu hương trà xanh',
+    slug: 'cat-dau-nanh-huu-co-huong-tra-xanh',
+    price: 85000,
+    wholesale_price: 66300,
+    image: '/zc.webp',
+    sold_quantity: 8200,
+  },
+  {
+    id: 113,
+    odoo_id: 3291,
+    sku: 'TLT',
+    name: 'Tã lót vệ sinh kháng khuẩn cao cấp size M',
+    slug: 'ta-lot-ve-sinh-khang-khuan-size-m',
+    price: 120000,
+    wholesale_price: 93600,
+    image: '/tlt.webp',
+    sold_quantity: 6400,
+  },
+  {
+    id: 114,
+    odoo_id: 3292,
+    sku: 'TL',
+    name: 'Tã dán cho thú cưng đực & cái cao cấp',
+    slug: 'ta-dan-cho-thu-cung-cao-cap',
+    price: 135000,
+    wholesale_price: 105300,
+    image: '/tl.webp',
+    sold_quantity: 5800,
+  },
+  {
+    id: 115,
+    odoo_id: 3293,
+    sku: 'C10',
+    name: 'Que gặm xoắn da bò quấn thịt gà',
+    slug: 'que-gam-xoan-da-bo-quan-thit-ga',
+    price: 28000,
+    wholesale_price: 21840,
+    image: '/c10.webp',
+    sold_quantity: 9100,
   }
-} catch (error) {
-  console.error("❌ Lỗi kết nối Directus:", error);
-}
-
-// 4. Hàm lấy URL ảnh sản phẩm
-function getProductImage(product) {
-  if (!product.images || product.images.length === 0) {
-    return 'https://placehold.co/400x400/fef3df/083a3c?text=LA+PET';
-  }
-
-  const firstImg = product.images[0];
-  let fileId = null;
-
-  if (typeof firstImg.directus_files_id === 'string') {
-    fileId = firstImg.directus_files_id;
-  } else if (firstImg.directus_files_id?.id) {
-    fileId = firstImg.directus_files_id.id;
-  } else if (typeof firstImg === 'string') {
-    fileId = firstImg;
-  }
-
-  if (!fileId) return 'https://placehold.co/400x400/fef3df/083a3c?text=LA+PET';
-  
-  return `${DIRECTUS_URL}/assets/${fileId}?width=400&height=400&quality=80&fit=cover`;
-}
-
-// 5. Định dạng tiền tệ VND
-function formatPrice(price) {
-  if (typeof price !== 'number' || isNaN(price)) return '0đ';
-  return price.toLocaleString('vi-VN') + 'đ';
-}
-
-// 6. Lọc danh sách Sản phẩm bán chạy
-const bestSellers = allProducts.slice(0, 8);
-
-// 7. Nhóm sản phẩm theo Danh mục (Category)
-const categoriesMap = new Map();
-allProducts.forEach((product) => {
-  const catName = product.category?.name || 'Sản phẩm khác';
-  const catSlug = product.category?.slug || 'san-pham-khac';
-
-  if (!categoriesMap.has(catSlug)) {
-    categoriesMap.set(catSlug, {
-      id: catSlug,
-      title: catName,
-      subtext: `Thức ăn & phụ kiện ${catName.toLowerCase()} chính hãng, chất lượng cao`,
-      products: []
-    });
-  }
-
-  if (categoriesMap.get(catSlug).products.length < 4) {
-    categoriesMap.get(catSlug).products.push(product);
-  }
-});
-
-const categoriesData = Array.from(categoriesMap.values());
-
-// Cam kết thương hiệu
-const features = [
-  { icon: 'M5 13l4 4L19 7', title: 'Hàng Chính Hãng 100%', desc: 'Đảm bảo nguồn gốc rõ ràng' },
-  { icon: 'M13 10V3L4 14h7v7l9-11h-7z', title: 'Giao Hàng Siêu Tốc', desc: 'Nội thành chỉ trong 2 giờ' },
-  { icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15', title: 'Đổi Trả Dễ Dàng', desc: 'Hỗ trợ đổi trả trong 7 ngày' },
-  { icon: 'M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z', title: 'Hỗ Trợ 24/7', desc: 'Tư vấn nhiệt tình, chu đáo' },
 ];
 
-// Khai báo hàm formatQuantity trong phần Frontmatter
-function formatQuantity(qty: number) {
-  if (typeof qty !== 'number' || isNaN(qty)) return '0';
-  return qty.toLocaleString('vi-VN');
-}
+// Chuẩn hóa danh sách sản phẩm hiển thị
+const allProducts = rawShowcaseProducts.length > 0
+  ? rawShowcaseProducts.map((p) => {
+      const retail = p.price || 20000;
+      const wholesale = p.wholesale_price && p.wholesale_price < retail
+        ? p.wholesale_price
+        : Math.round(retail * 0.78);
+      const skuLower = (p.sku || '').toLowerCase();
+      const localFallback = skuLower ? `/${skuLower}.webp` : '/images/placeholder-product.svg';
+      const img = p.imageIds?.[0]
+        ? assetUrl(p.imageIds[0], { width: 400, height: 500, fit: 'contain', quality: 85, format: 'webp' })
+        : localFallback;
+      return {
+        id: p.id,
+        odoo_id: p.odoo_id || p.id,
+        sku: p.sku || 'LAPET',
+        name: p.name,
+        slug: p.slug,
+        price: retail,
+        wholesale_price: wholesale,
+        image: img,
+        sold_quantity: p.sold_quantity || 0,
+      };
+    })
+  : fallbackProducts;
 
-// Nếu trang của bạn chưa có hàm formatPrice, bạn cũng có thể định nghĩa thêm:
-function formatPrice(price: number) {
-  if (typeof price !== 'number' || isNaN(price)) return '0đ';
-  return price.toLocaleString('vi-VN') + 'đ';
-}
+// Phân chia các danh mục sản phẩm trên trang chủ (mỗi hàng 4 sản phẩm)
+const trendingList = allProducts.slice(0, 4);
+const bestSellerList = allProducts.length >= 8 ? allProducts.slice(4, 8) : allProducts.slice(0, 4);
+const lowestPriceList = allProducts.length >= 12 ? allProducts.slice(8, 12) : fallbackProducts.slice(8, 12);
 
+// Danh mục thực tế với 8 icon độc quyền từ LA PET và 8 ô màu pastel chuẩn PawZone
+const defaultCategoryList = [
+  { 
+    name: 'Nhóm không quấn gà', 
+    slug: 'nhom-khong-quan-ga', 
+    icon: '/pawzone_assets/cat_icon_khong_quan_ga.png',
+    bgColor: '#FDF6E4' 
+  },
+  { 
+    name: 'Nhóm quấn gà', 
+    slug: 'nhom-quan-ga', 
+    icon: '/pawzone_assets/cat_icon_quan_ga.png',
+    bgColor: '#E3F3F9' 
+  },
+  { 
+    name: 'Nhóm da bò', 
+    slug: 'nhom-da-bo', 
+    icon: '/pawzone_assets/cat_icon_da_bo.png',
+    bgColor: '#FEE7EC' 
+  },
+  { 
+    name: 'Nhóm keo nhai', 
+    slug: 'nhom-keo-nhai', 
+    icon: '/pawzone_assets/cat_icon_keo_nhai.png',
+    bgColor: '#E9F7EF' 
+  },
+  { 
+    name: 'Nhóm thịt sấy', 
+    slug: 'nhom-thit-say', 
+    icon: '/pawzone_assets/cat_icon_thit_say.png',
+    bgColor: '#E9F9EE' 
+  },
+  { 
+    name: 'Nhóm que gặm tổng hợp', 
+    slug: 'nhom-que-gam-tong-hop', 
+    icon: '/pawzone_assets/cat_icon_tong_hop.png',
+    bgColor: '#FEF4E8' 
+  },
+  { 
+    name: 'Tã cho thú cưng', 
+    slug: 'ta-cho-thu-cung', 
+    icon: '/pawzone_assets/cat_icon_ta.png',
+    bgColor: '#E3F1FB' 
+  },
+  { 
+    name: 'Cát vệ sinh cho mèo', 
+    slug: 'cat-ve-sinh-meo', 
+    icon: '/pawzone_assets/cat_icon_cat.png',
+    bgColor: '#FEE8EC' 
+  },
+];
+
+const displayCategories = defaultCategoryList.map((item) => {
+  const matched = rawProductGroups.find(g => g.slug === item.slug);
+  return {
+    name: matched?.name || item.name,
+    slug: matched?.slug || item.slug,
+    bgColor: item.bgColor,
+    icon: item.icon,
+  };
+});
+
+// Cam kết dịch vụ
+const valueProps = [
+  {
+    icon: 'M13 10V3L4 14h7v7l9-11h-7z',
+    title: 'Giao Hàng Hỏa Tốc',
+    desc: 'Nội thành chỉ trong 2 giờ, hỗ trợ chành xe toàn quốc'
+  },
+  {
+    icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
+    title: 'Hàng Chính Hãng 100%',
+    desc: 'Đầy đủ chứng nhận kiểm định & hóa đơn VAT'
+  },
+  {
+    icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15',
+    title: 'Đổi Trả Trong 7 Ngày',
+    desc: 'Bảo hành chất lượng, đổi mới sản phẩm lỗi do nhà sản xuất'
+  },
+  {
+    icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+    title: 'Chiết Khấu Đại Lý Tới 22%',
+    desc: 'Bảng giá sỉ B2B minh bạch cùng thưởng doanh số theo quý'
+  }
+];
+
+const pageTitle = "LA PET - Cổng Đặt Hàng B2B Đại Lý Phụ Kiện & Thức Ăn Thú Cưng";
+const pageDescription = "Cổng phân phối sỉ bánh thưởng, que gặm, tã lót và cát vệ sinh thú cưng cao cấp LA PET. Chiết khấu đại lý tới 22%, hỗ trợ giao hàng hỏa tốc toàn quốc.";
 ---
 
-<!DOCTYPE html>
-<html lang="vi" class="scroll-smooth">
-<head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LA PET - Cửa Hàng Thức Ăn & Phụ Kiện Thú Cưng Cao Cấp</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-    <style>
-      body { font-family: 'Plus Jakarta Sans', sans-serif; }
-    </style>
-</head>
-<body class="bg-[#faf9f6] text-[#083a3c] flex flex-col min-h-screen antialiased">
+<BaseLayout title={pageTitle} description={pageDescription}>
 
-    <!-- Header Component -->
-    <Header />
+  <div class="max-w-[1140px] mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-10 sm:space-y-12">
 
-    <main class="flex-grow space-y-12 md:space-y-16 pb-20">
+    <!-- ================= 1. HERO BENTO GRID (3 Cards chuẩn phong cách PawZone) ================= -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+      
+      <!-- Big Left Card: Chiết khấu lên tới 22% OFF (#9CD0EA) -->
+      <div class="lg:col-span-8 bg-[#9CD0EA] rounded-[28px] p-6 sm:p-10 relative overflow-hidden flex flex-col justify-between min-h-[380px] sm:min-h-[420px] lg:min-h-[460px] shadow-sm">
         
-      <!-- ================= 1. HERO BANNER SLIDER ================= -->
-      <section 
-        x-data="{
-          activeSlide: 0,
-          banners: [
-            '/hinh1.webp',
-            '/hinh2.webp',
-            '/hinh3.webp',
-            '/hinh4.webp'
-          ],
-          timer: null,
-          init() {
-            this.startTimer();
-          },
-          startTimer() {
-            this.timer = setInterval(() => { this.next() }, 5000);
-          },
-          resetTimer() {
-            clearInterval(this.timer);
-            this.startTimer();
-          },
-          next() {
-            this.activeSlide = (this.activeSlide + 1) % this.banners.length;
-          },
-          prev() {
-            this.activeSlide = (this.activeSlide - 1 + this.banners.length) % this.banners.length;
-          }
-        }"
-        class="relative w-full overflow-hidden bg-[#083a3c] group"
-      >
-        <div class="relative w-full h-[280px] sm:h-[420px] md:h-[500px] lg:h-[600px]">
-          <template x-for="(banner, index) in banners" :key="index">
+        <!-- Full-cover background image: White cat reaching toward food bowl -->
+        <img 
+          src="/pawzone_assets/hero_big_cat_bowl.png" 
+          alt="Dinh dưỡng thú cưng LA PET" 
+          class="absolute inset-0 w-full h-full object-cover object-center pointer-events-none select-none"
+        />
+
+        <!-- Text Area (on left side) -->
+        <div class="max-w-xs sm:max-w-sm space-y-2 relative z-10">
+          <p class="text-xs sm:text-sm font-bold text-[#07394D] uppercase tracking-wider">Chiết khấu đại lý lên tới</p>
+          
+          <div class="relative inline-block pb-1">
+            <h1 class="text-4xl sm:text-5xl font-black text-[#07394D] tracking-tight leading-none">
+              22% OFF
+            </h1>
+            <!-- The signature yellow underline under 22% OFF -->
+            <div class="w-full h-1.5 bg-[#F8DE59] mt-1.5 rounded-full"></div>
+          </div>
+
+          <p class="text-xs sm:text-sm font-semibold text-[#07394D] pt-1">
+            Hàng ngàn sản phẩm thú cưng cao cấp cho đại lý &amp; nhà phân phối toàn quốc
+          </p>
+
+          <div class="pt-4 flex flex-wrap items-center gap-3">
+            <a 
+              href="/san-pham" 
+              class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#07394D] hover:bg-[#052937] text-white text-xs sm:text-sm font-bold shadow-sm transition-transform hover:-translate-y-0.5 cursor-pointer"
+            >
+              <span>Xem Bảng Giá Sỉ</span>
+              <span>&gt;</span>
+            </a>
+            <a 
+              href="/dat-hang-nhanh" 
+              class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/90 hover:bg-white text-[#07394D] text-xs sm:text-sm font-bold shadow-sm transition-transform hover:-translate-y-0.5 cursor-pointer"
+            >
+              <span>Đặt Hàng Nhanh</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- Bottom slider indicator -->
+        <div class="relative z-10 pt-6 flex items-center gap-1.5 text-[11px] font-bold text-[#07394D]">
+          <span class="inline-block w-5 h-1 bg-[#07394D] rounded-full"></span>
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-[#07394D]"></span>
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-[#07394D]/50"></span>
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-[#07394D]/50"></span>
+        </div>
+
+      </div>
+
+      <!-- Right Stacked 2 Cards -->
+      <div class="lg:col-span-4 flex flex-col gap-5">
+        
+        <!-- Top Right Card: Dành Cho Mèo (#015D7F) -->
+        <div class="flex-1 bg-[#015D7F] rounded-[28px] p-5 sm:p-6 relative overflow-hidden flex items-center justify-between min-h-[180px] lg:min-h-[215px] shadow-sm">
+          <!-- Full-cover background image: Fluffy Cat with Sunglasses -->
+          <img 
+            src="/pawzone_assets/hero_cat_glasses.png" 
+            alt="Mèo đeo kính sành điệu" 
+            class="absolute inset-0 w-full h-full object-cover object-center pointer-events-none select-none"
+          />
+
+          <div class="space-y-3 relative z-10 max-w-[140px]">
+            <h3 class="text-white text-base sm:text-lg font-bold leading-tight">
+              Dành Cho<br/>Mèo Cưng???
+            </h3>
+            <a 
+              href="/san-pham?category=cat-ve-sinh-meo" 
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-white/80 hover:bg-white hover:text-[#015D7F] text-white text-[11px] font-semibold transition-colors cursor-pointer"
+            >
+              <span>Xem ngay</span>
+              <span>&gt;</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- Bottom Right Card: Dành Cho Chó (#67BADE) -->
+        <div class="flex-1 bg-[#67BADE] rounded-[28px] p-5 sm:p-6 relative overflow-hidden flex items-center justify-between min-h-[180px] lg:min-h-[215px] shadow-sm">
+          <!-- Full-cover background image: Dog in yellow hoodie -->
+          <img 
+            src="/pawzone_assets/hero_dog_hoodie.png" 
+            alt="Cún mặc áo hoodie vàng" 
+            class="absolute inset-0 w-full h-full object-cover object-center pointer-events-none select-none"
+          />
+
+          <div class="relative z-10 ml-auto space-y-3 max-w-[140px] text-right">
+            <h3 class="text-white text-base sm:text-lg font-bold leading-tight">
+              Dành Cho<br/>Cún Yêu???
+            </h3>
+            <a 
+              href="/san-pham?category=nhom-que-gam-tong-hop" 
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-white/80 hover:bg-white hover:text-[#07394D] text-white text-[11px] font-semibold transition-colors cursor-pointer"
+            >
+              <span>Xem ngay</span>
+              <span>&gt;</span>
+            </a>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+
+    <!-- ================= 2. TOP CATEGORIES (8 ô danh mục Pastel chuẩn PawZone) ================= -->
+    <section class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-lg sm:text-xl font-bold text-[#07394D]">Danh Mục Nổi Bật</h2>
+          <p class="text-xs text-slate-500">Các nhóm sản phẩm phân phối sỉ chủ lực</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <a href="/san-pham" class="text-xs font-semibold text-slate-500 hover:text-[#07394D] transition-colors">Xem tất cả &gt;</a>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-4 sm:grid-cols-8 gap-3 sm:gap-4 items-stretch">
+        {displayCategories.map((cat) => (
+          <a 
+            href={`/san-pham?category=${cat.slug}`} 
+            class="flex flex-col items-center justify-between h-full group text-center"
+          >
+            <!-- Fixed aspect-square icon box with white background -->
             <div 
-              x-show="activeSlide === index"
-              x-transition:enter="transition ease-out duration-700 transform"
-              x-transition:enter-start="opacity-0 scale-105"
-              x-transition:enter-end="opacity-100 scale-100"
-              x-transition:leave="transition ease-in duration-500 transform"
-              x-transition:leave-start="opacity-100 scale-100"
-              x-transition:leave-end="opacity-0 scale-95"
-              class="absolute inset-0 w-full h-full"
+              class="w-full aspect-square rounded-2xl flex items-center justify-center p-3 sm:p-3.5 bg-white border border-slate-100 group-hover:border-slate-200 group-hover:-translate-y-1 transition-all duration-200 shadow-2xs group-hover:shadow-card overflow-hidden"
             >
               <img 
-                :src="banner" 
-                :alt="'LA PET Banner ' + (index + 1)"
-                :loading="index === 0 ? 'eager' : 'lazy'"
-                :fetchpriority="index === 0 ? 'high' : 'auto'"
-                class="w-full h-full object-cover object-center"
-                onerror="this.onerror=null; this.src='https://placehold.co/1920x650/083a3c/23c1c6?text=LA+PET+Banner';"
+                src={cat.icon} 
+                alt={cat.name} 
+                class="max-h-full max-w-full object-contain group-hover:scale-110 transition-transform duration-200 drop-shadow-2xs"
+                onerror="this.onerror=null; this.src='/pawzone_assets/cat_1.png';"
               />
-              <div class="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent"></div>
             </div>
-          </template>
+
+            <!-- Fixed min-height label box ensuring all 8 cards are exactly equal -->
+            <div class="mt-2 flex items-center justify-center min-h-[38px] w-full px-0.5">
+              <span class="text-[11px] font-semibold text-gray-700 group-hover:text-[#07394D] leading-tight line-clamp-2 transition-colors">
+                {cat.name}
+              </span>
+            </div>
+          </a>
+        ))}
+      </div>
+    </section>
+
+
+    <!-- ================= 3. SẢN PHẨM MỚI & NỔI BẬT (New & Trending) ================= -->
+    <section class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base sm:text-lg font-bold text-[#07394D]">Sản Phẩm Mới &amp; Nổi Bật</h2>
+          <p class="text-xs text-slate-500">Dòng sản phẩm vừa ra mắt và được ưa chuộng</p>
         </div>
+        <a href="/san-pham" class="text-xs font-semibold text-slate-500 hover:text-[#07394D] transition-colors">Xem tất cả &gt;</a>
+      </div>
 
-        <button 
-          @click="prev(); resetTimer();"
-          class="absolute left-3 md:left-6 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/80 hover:bg-white text-[#083a3c] shadow-xl flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 hover:scale-110 z-10 backdrop-blur-sm cursor-pointer"
-          aria-label="Previous Banner"
-        >
-          <svg class="w-5 h-5 stroke-current fill-none stroke-[2.5]" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>
-        </button>
-        <button 
-          @click="next(); resetTimer();"
-          class="absolute right-3 md:right-6 top-1/2 -translate-y-1/2 w-10 h-10 md:w-12 md:h-12 rounded-full bg-white/80 hover:bg-white text-[#083a3c] shadow-xl flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 hover:scale-110 z-10 backdrop-blur-sm cursor-pointer"
-          aria-label="Next Banner"
-        >
-          <svg class="w-5 h-5 stroke-current fill-none stroke-[2.5]" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
-        </button>
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-5">
+        {trendingList.map((item) => (
+          <ProductCard product={item} />
+        ))}
+      </div>
+    </section>
 
-        <div class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2.5 z-10 bg-black/30 backdrop-blur-md px-3.5 py-1.5 rounded-full">
-          <template x-for="(banner, index) in banners" :key="index">
+
+    <!-- ================= 4. SẢN PHẨM BÁN CHẠY CHO ĐẠI LÝ (Popular Items) ================= -->
+    <section class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base sm:text-lg font-bold text-[#07394D]">Sản Phẩm Bán Chạy Cho Đại Lý</h2>
+          <p class="text-xs text-slate-500">Sản lượng tiêu thụ cao nhất tại hệ thống kho trung tâm</p>
+        </div>
+        <a href="/san-pham" class="text-xs font-semibold text-slate-500 hover:text-[#07394D] transition-colors">Xem tất cả &gt;</a>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-5">
+        {bestSellerList.map((item) => (
+          <ProductCard product={item} />
+        ))}
+      </div>
+    </section>
+
+
+    <!-- ================= 5. GIÁ SỈ TỐT NHẤT HÔM NAY (Today's Lowest Prices) ================= -->
+    <section class="space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base sm:text-lg font-bold text-[#07394D]">Giá Sỉ Tốt Nhất Hôm Nay</h2>
+          <p class="text-xs text-slate-500">Mức chiết khấu đại lý tốt nhất trong tuần</p>
+        </div>
+        <a href="/san-pham" class="text-xs font-semibold text-slate-500 hover:text-[#07394D] transition-colors">Xem tất cả &gt;</a>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-5">
+        {lowestPriceList.map((item) => (
+          <ProductCard product={item} />
+        ))}
+      </div>
+    </section>
+
+
+    <!-- ================= 7. BANNER ĐĂNG KÝ ĐẠI LÝ B2B ================= -->
+    <section class="rounded-[28px] overflow-hidden shadow-sm relative bg-[#98D3EB] min-h-[260px] sm:min-h-[300px] flex items-center">
+      <!-- Full-cover background image: Black and tan dog & fluffy tabby cat -->
+      <img 
+        src="/pawzone_assets/partner_banner_dog_cat.png" 
+        alt="Đăng ký đại lý phân phối LA PET" 
+        class="absolute inset-0 w-full h-full object-cover object-center pointer-events-none select-none" 
+      />
+
+      <!-- Overlay Content on the Left -->
+      <div class="relative z-10 p-6 sm:p-10 lg:p-12 max-w-xl space-y-3.5">
+        <span class="inline-block px-3 py-1 rounded-full bg-[#07394D]/10 text-[#07394D] font-bold text-xs uppercase tracking-wider">
+          Hợp Tác Phân Phối B2B
+        </span>
+        
+        <h3 class="text-2xl sm:text-3xl lg:text-4xl font-black text-[#07394D] tracking-tight leading-tight">
+          Đăng Ký Nhận Báo Giá Sỉ &amp; Chính Sách Đại Lý
+        </h3>
+
+        <p class="text-xs sm:text-sm font-semibold text-[#07394D]/85 leading-relaxed max-w-md">
+          Chiết khấu đại lý lên tới 22%, hỗ trợ chành xe 63 tỉnh thành &amp; cập nhật danh mục bánh thưởng, que gặm mới nhất từ LA PET.
+        </p>
+
+        <!-- Subscription / Registration Input Box matching user's component reference -->
+        <form id="hero-partner-form" class="w-full max-w-md pt-1.5">
+          <div class="flex items-center bg-white rounded-full p-1.5 pl-4 shadow-md border border-slate-200/80 focus-within:border-[#07394D] transition-all">
+            <!-- Envelope Icon -->
+            <svg class="w-5 h-5 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+            <input 
+              type="email" 
+              id="partner-reg-email-input" 
+              name="email" 
+              placeholder="Nhập địa chỉ email của bạn..." 
+              required 
+              class="flex-1 px-3 text-xs sm:text-sm text-slate-800 placeholder-slate-400 bg-transparent focus:outline-none"
+            />
             <button 
-              @click="activeSlide = index; resetTimer();"
-              :class="activeSlide === index ? 'w-7 bg-[#23c1c6]' : 'w-2 bg-white/60 hover:bg-white'"
-              class="h-2 rounded-full transition-all duration-300 cursor-pointer"
-              :aria-label="'Go to slide ' + (index + 1)"
-            ></button>
-          </template>
-        </div>
-      </section>
-
-      <!-- ================= 2. MỤC CAM KẾT ================= -->
-      <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-6 relative z-20">
-        <div class="bg-white rounded-2xl p-4 sm:p-6 shadow-lg border border-slate-100 grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-          {features.map((item) => (
-            <div class="flex items-center gap-3 group">
-              <div class="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-[#fef3df] text-[#083a3c] flex items-center justify-center group-hover:bg-[#23c1c6] group-hover:text-white transition-all duration-300 shrink-0">
-                <svg class="w-5 h-5 md:w-6 md:h-6 stroke-current fill-none stroke-2" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" d={item.icon} />
-                </svg>
-              </div>
-              <div>
-                <h4 class="font-bold text-xs sm:text-sm md:text-base text-[#083a3c] leading-tight">{item.title}</h4>
-                <p class="text-[11px] sm:text-xs text-slate-500 mt-0.5">{item.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <!-- ================= 3. MỤC ƯU ĐÃI ================= -->
-      <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-          <a href="/khuyen-mai/deal-ngay" class="group relative rounded-2xl overflow-hidden bg-gradient-to-br from-[#23c1c6] via-[#16a1a6] to-[#083a3c] p-6 text-white min-h-[190px] flex flex-col justify-between shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-            <div class="absolute -right-6 -bottom-6 w-36 h-36 bg-white/10 rounded-full blur-2xl group-hover:scale-150 transition-transform"></div>
-            <div class="relative z-10 max-w-xs sm:max-w-sm">
-              <span class="bg-white text-[#083a3c] font-extrabold text-[10px] sm:text-[11px] tracking-wider px-2.5 py-1 rounded-full uppercase shadow-xs">
-                🔥 Deal Hot Tuần Này
-              </span>
-              <h3 class="text-xl sm:text-2xl font-black mt-3 leading-snug">Giảm Đến 40% Tất Cả Bánh Thưởng</h3>
-              <p class="text-xs text-white/90 mt-1.5 font-medium">Thưởng siêu ngon cho bé ngoan - Số lượng có hạn!</p>
-            </div>
-            <div class="relative z-10 mt-4 inline-flex items-center gap-1.5 font-bold text-xs sm:text-sm bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-full w-fit group-hover:bg-white group-hover:text-[#083a3c] transition-all">
-              <span>Mua Ngay</span>
-              <svg class="w-4 h-4 stroke-current fill-none stroke-2 group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-            </div>
-          </a>
-
-          <a href="/khuyen-mai/combo-ve-sinh" class="group relative rounded-2xl overflow-hidden bg-gradient-to-br from-[#fef3df] via-[#fce4bd] to-[#23c1c6]/30 border border-[#23c1c6]/20 p-6 text-[#083a3c] min-h-[190px] flex flex-col justify-between shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300">
-            <div class="absolute -right-6 -bottom-6 w-36 h-36 bg-[#23c1c6]/10 rounded-full blur-2xl group-hover:scale-150 transition-transform"></div>
-            <div class="relative z-10 max-w-xs sm:max-w-sm">
-              <span class="bg-[#083a3c] text-white font-extrabold text-[10px] sm:text-[11px] tracking-wider px-2.5 py-1 rounded-full uppercase shadow-xs">
-                🎁 Combo Tiết Kiệm
-              </span>
-              <h3 class="text-xl sm:text-2xl font-black mt-3 leading-snug text-[#083a3c]">Cát Vệ Sinh & Tả Lót Mua 2 Tặng 1</h3>
-              <p class="text-xs text-slate-700 mt-1.5 font-medium">Giải pháp giữ vệ sinh nhà cửa luôn sạch thơm</p>
-            </div>
-            <div class="relative z-10 mt-4 inline-flex items-center gap-1.5 font-bold text-xs sm:text-sm bg-[#083a3c] text-white px-4 py-2 rounded-full w-fit group-hover:bg-[#23c1c6] group-hover:text-[#083a3c] transition-all">
-              <span>Khám Phá Ngay</span>
-              <svg class="w-4 h-4 stroke-current fill-none stroke-2 group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-            </div>
-          </a>
-        </div>
-      </section>
-
-      <!-- ================= 4. MỤC SẢN PHẨM BÁN CHẠY ================= -->
-<section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-  <div class="flex items-end justify-between mb-6 pb-3 border-b border-slate-200/80 gap-4">
-    <div>
-      <div class="flex items-center gap-1.5 text-[#23c1c6] font-bold text-[11px] uppercase tracking-widest mb-0.5">
-        <span class="w-2 h-2 rounded-full bg-[#23c1c6]"></span> Best Sellers
-      </div>
-      <h2 class="text-xl sm:text-2xl font-black text-[#083a3c]">Sản Phẩm Bán Chạy</h2>
-    </div>
-    <a href="/san-pham?sort=sold-desc" class="group inline-flex items-center gap-1 font-bold text-xs sm:text-sm text-[#083a3c] hover:text-[#23c1c6] transition-colors">
-      <span>Xem tất cả</span>
-      <svg class="w-4 h-4 stroke-current fill-none stroke-2 group-hover:translate-x-1 transition-transform" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
-    </a>
-  </div>
-
-  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
-    {
-      /* Lấy 8 sản phẩm có lượt bán cao nhất */
-      bestSellers
-        .sort((a, b) => (Number(b.sold_quantity) || 0) - (Number(a.sold_quantity) || 0))
-        .slice(0, 8)
-        .map((product) => {
-          const productImage = getProductImage(product);
-          const soldQuantity = Number(product.sold_quantity) || 0;
-          
-          const retailPrice = Number(product.price) || 0;
-          const wholesalePrice = Number(product.wholesale_price) || 0;
-          const activePrice = isDealer && wholesalePrice > 0 ? wholesalePrice : retailPrice;
-
-          let parsedOdooId = null;
-          if (product.odoo_id !== null && product.odoo_id !== undefined && product.odoo_id !== 'null' && product.odoo_id !== '') {
-            const num = parseInt(String(product.odoo_id), 10);
-            if (!isNaN(num)) parsedOdooId = num;
-          }
-
-          return (
-            <div
-              class="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 flex flex-col justify-between shadow-xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group relative"
-              data-product-id={product.id}
-              data-odoo-id={parsedOdooId ?? ''}
-              data-sku={product.sku || ''}
-              data-name={product.name}
-              data-wholesale-price={wholesalePrice}
-              data-retail-price={retailPrice}
-              data-effective-price={activePrice}
-              data-image={productImage}
+              type="submit" 
+              class="px-5 sm:px-6 py-2.5 sm:py-3 rounded-full bg-[#07394D] hover:bg-[#052937] text-white text-xs sm:text-sm font-bold shadow-sm transition-all shrink-0 cursor-pointer"
             >
-              <button class="absolute top-5 right-5 z-10 w-8 h-8 rounded-full bg-white/80 backdrop-blur-md flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-white shadow-xs transition-all cursor-pointer">
-                <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24">
-                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                </svg>
-              </button>
+              Đăng Ký Đại Lý
+            </button>
+          </div>
+          <p class="text-[11px] text-[#07394D]/75 mt-2 pl-2 flex items-center gap-1 font-medium">
+            <span>🔒 Cam kết bảo mật thông tin đối tác đại lý.</span>
+          </p>
+        </form>
 
-              <div>
-                <!-- BADGE HIỂN THỊ LƯỢT BÁN VÀ NGỌN LỬA -->
-                <div class="mb-2 flex items-center">
-                  {
-                    soldQuantity < 5000 ? (
-                      /* Dưới 5.000: 1 ngọn lửa */
-                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200/60 shadow-2xs">
-                        <svg class="w-3 h-3 fill-amber-500 shrink-0" viewBox="0 0 20 20">
-                          <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                        </svg>
-                        Đã bán {formatQuantity(soldQuantity)}
-                      </span>
-                    ) : soldQuantity <= 20000 ? (
-                      /* Từ 5.000 - 20.000: 2 ngọn lửa */
-                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-700 border border-orange-200/60 shadow-2xs">
-                        <div class="flex -space-x-1">
-                          <svg class="w-3 h-3 fill-orange-500 shrink-0" viewBox="0 0 20 20">
-                            <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                          </svg>
-                          <svg class="w-3 h-3 fill-orange-500 shrink-0" viewBox="0 0 20 20">
-                            <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                          </svg>
-                        </div>
-                        Đã bán {formatQuantity(soldQuantity)}
-                      </span>
-                    ) : (
-                      /* Trên 20.000: 3 ngọn lửa */
-                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200/60 shadow-2xs">
-                        <div class="flex -space-x-1">
-                          <svg class="w-3 h-3 fill-rose-500 shrink-0" viewBox="0 0 20 20">
-                            <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                          </svg>
-                          <svg class="w-3 h-3 fill-rose-500 shrink-0" viewBox="0 0 20 20">
-                            <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                          </svg>
-                          <svg class="w-3 h-3 fill-rose-500 shrink-0" viewBox="0 0 20 20">
-                            <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                          </svg>
-                        </div>
-                        Đã bán {formatQuantity(soldQuantity)}
-                      </span>
-                    )
-                  }
-                </div>
-
-                <a href={`/san-pham/${product.slug}`} class="block relative aspect-square rounded-xl overflow-hidden bg-[#fef3df]/30 mb-3">
-                  <img
-                    src={productImage}
-                    alt={product.name}
-                    loading="lazy"
-                    decoding="async"
-                    class="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
-                    onerror="this.onerror=null; this.src='https://placehold.co/400x400/fef3df/083a3c?text=LA+PET';"
-                  />
-                </a>
-
-                <a href={`/san-pham/${product.slug}`}>
-                  <h3 class="font-bold text-xs sm:text-sm text-[#083a3c] hover:text-[#23c1c6] line-clamp-2">
-                    {product.name}
-                  </h3>
-                </a>
-              </div>
-
-              <div class="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
-                <div class="flex flex-col">
-                  {isDealer && wholesalePrice > 0 && (
-                    <span class="text-[11px] text-slate-400 line-through">
-                      {formatPrice(retailPrice)}
-                    </span>
-                  )}
-
-                  <span class="font-black text-sm sm:text-base text-[#d82a72]">
-                    {formatPrice(activePrice)}
-                  </span>
-                </div>
-
-                <button class="add-to-cart-btn bg-[#23c1c6] hover:bg-[#083a3c] text-[#083a3c] hover:text-white w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all shadow-xs shrink-0 cursor-pointer" title="Thêm vào giỏ hàng">
-                  <svg class="w-4 h-4 sm:w-5 sm:h-5 stroke-current fill-none stroke-2" viewBox="0 0 24 24">
-                    <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
-                    <line x1="3" y1="6" x2="21" y2="6"/>
-                    <path d="M16 10a4 4 0 0 1-8 0"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-          );
-        })
-    }
-  </div>
-</section>
-
-<!-- ================= 5. DANH MỤC SECTION ================= -->
-{categoriesData.map((category) => (
-  <section id={category.id} class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="bg-white rounded-2xl p-4 sm:p-5 mb-5 shadow-xs border border-slate-100 flex items-center justify-between gap-3">
-      <div>
-        <h2 class="text-base sm:text-xl font-black text-[#083a3c] uppercase tracking-wide flex items-center gap-2">
-          <span class="w-2 h-5 bg-[#23c1c6] rounded-full inline-block"></span>
-          {category.title}
-        </h2>
-        <p class="text-[11px] sm:text-xs text-slate-500 font-medium mt-0.5 pl-4 sm:pl-4 hidden sm:block">{category.subtext}</p>
       </div>
-      <a href={`/san-pham?category=${category.id}`} class="inline-flex items-center gap-1 text-xs font-bold text-[#083a3c] hover:text-[#23c1c6] bg-[#fef3df] hover:bg-[#23c1c6]/20 px-3 py-1.5 rounded-full transition-all shrink-0">
-        <span>Xem tất cả</span>
-        <svg class="w-3.5 h-3.5 stroke-current fill-none stroke-2" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>
-      </a>
-    </div>
+    </section>
 
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-5">
-      {category.products.map((item) => {
-        const itemImage = getProductImage(item);
-        const soldQuantity = Number(item.sold_quantity) || 0;
+    <!-- Script điều hướng sang trang Đăng Ký Đại Lý kèm email điền sẵn -->
+    <script is:inline>
+      (() => {
+        const form = document.getElementById('hero-partner-form');
+        const input = document.getElementById('partner-reg-email-input');
+        if (!form || !input) return;
 
-        const retailPrice = Number(item.price) || 0;
-        const wholesalePrice = Number(item.wholesale_price) || 0;
-        const activePrice = isDealer && wholesalePrice > 0 ? wholesalePrice : retailPrice;
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          const email = input.value.trim();
+          if (!email) return;
+          try {
+            sessionStorage.setItem('dealer_reg_email', email);
+          } catch(err) {}
+          window.location.href = `/lien-he?email=${encodeURIComponent(email)}#partner-registration`;
+        });
+      })();
+    </script>
 
-        let parsedOdooId = null;
-        if (item.odoo_id !== null && item.odoo_id !== undefined && item.odoo_id !== 'null' && item.odoo_id !== '') {
-          const num = parseInt(String(item.odoo_id), 10);
-          if (!isNaN(num)) parsedOdooId = num;
-        }
 
-        return (
-          <div 
-            class="bg-white rounded-2xl border border-slate-100 p-3 sm:p-4 flex flex-col justify-between shadow-xs hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group"
-            data-product-id={item.id}
-            data-odoo-id={parsedOdooId !== null ? parsedOdooId : ''}
-            data-sku={item.sku || ''}
-            data-name={item.name}
-            data-wholesale-price={wholesalePrice}
-            data-retail-price={retailPrice}
-            data-effective-price={activePrice}
-            data-image={itemImage}
-          >
-            <div>
-              <!-- BADGE HIỂN THỊ LƯỢT BÁN CHO CÁC DANH MỤC KHÁC -->
-              <div class="mb-2 flex items-center">
-                {
-                  soldQuantity < 5000 ? (
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200/60 shadow-2xs">
-                      <svg class="w-3 h-3 fill-amber-500 shrink-0" viewBox="0 0 20 20">
-                        <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                      </svg>
-                      Đã bán {formatQuantity(soldQuantity)}
-                    </span>
-                  ) : soldQuantity <= 20000 ? (
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-700 border border-orange-200/60 shadow-2xs">
-                      <div class="flex -space-x-1">
-                        <svg class="w-3 h-3 fill-orange-500 shrink-0" viewBox="0 0 20 20">
-                          <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                        </svg>
-                        <svg class="w-3 h-3 fill-orange-500 shrink-0" viewBox="0 0 20 20">
-                          <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                        </svg>
-                      </div>
-                      Đã bán {formatQuantity(soldQuantity)}
-                    </span>
-                  ) : (
-                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200/60 shadow-2xs">
-                      <div class="flex -space-x-1">
-                        <svg class="w-3 h-3 fill-rose-500 shrink-0" viewBox="0 0 20 20">
-                          <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                        </svg>
-                        <svg class="w-3 h-3 fill-rose-500 shrink-0" viewBox="0 0 20 20">
-                          <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                        </svg>
-                        <svg class="w-3 h-3 fill-rose-500 shrink-0" viewBox="0 0 20 20">
-                          <path d="M12.395 2.553a1 1 0 00-1.45-1.348c-1.38 1.488-2.528 3.015-3.088 4.29-1.045 2.378-.453 4.238.256 5.372a6 6 0 002.321 2.213 1 1 0 001.317-1.42 4 4 0 01-.735-1.523c.334.053.672.083 1.014.083 2.923 0 5.02-2.181 5.02-5.181 0-1.782-.821-3.328-2.227-4.486a1 1 0 00-1.428 1.002c.162.723.111 1.421-.12 2.052a1 1 0 01-1.89-1.054c.381-1.037.49-2.214.01-3.238z" />
-                        </svg>
-                      </div>
-                      Đã bán {formatQuantity(soldQuantity)}
-                    </span>
-                  )
-                }
-              </div>
-
-              <a href={`/san-pham/${item.slug}`} class="block relative aspect-square rounded-xl overflow-hidden bg-[#fef3df]/40 mb-3">
-                <img 
-                  src={itemImage} 
-                  alt={item.name} 
-                  loading="lazy"
-                  decoding="async"
-                  class="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
-                  onerror="this.onerror=null; this.src='https://placehold.co/400x400/fef3df/083a3c?text=LA+PET';"
-                />
-              </a>
-
-              <a href={`/san-pham/${item.slug}`} class="block">
-                <h3 class="font-bold text-xs sm:text-sm text-[#083a3c] hover:text-[#23c1c6] transition-colors cursor-pointer line-clamp-2 leading-snug">
-                  {item.name}
-                </h3>
-              </a>
+    <!-- ================= 8. CAM KẾT DỊCH VỤ ================= -->
+    <section class="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        {valueProps.map((item) => (
+          <div class="flex items-start gap-3.5">
+            <div class="w-10 h-10 rounded-xl bg-[#07394D]/10 text-[#07394D] flex items-center justify-center shrink-0">
+              <svg class="w-5 h-5 stroke-current fill-none stroke-2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d={item.icon}></path>
+              </svg>
             </div>
-
-            <div class="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2">
-              <div class="flex flex-col">
-                {isDealer && wholesalePrice > 0 && (
-                  <span class="text-[11px] text-slate-400 line-through">
-                    {formatPrice(retailPrice)}
-                  </span>
-                )}
-
-                <span class="font-black text-sm sm:text-base text-[#d82a72]">
-                  {formatPrice(activePrice)}
-                </span>
-              </div>
-              
-              <button class="add-to-cart-btn bg-[#23c1c6] hover:bg-[#083a3c] text-[#083a3c] hover:text-white w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center transition-all shadow-xs shrink-0 cursor-pointer" title="Thêm vào giỏ hàng">
-                <svg class="w-4 h-4 sm:w-5 sm:h-5 stroke-current fill-none stroke-2" viewBox="0 0 24 24">
-                  <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
-                  <line x1="3" y1="6" x2="21" y2="6"></line>
-                  <path d="M16 10a4 4 0 0 1-8 0"></path>
-                </svg>
-              </button>
+            <div>
+              <h4 class="text-sm font-bold text-[#07394D] leading-snug">{item.title}</h4>
+              <p class="text-xs text-slate-500 mt-0.5 leading-relaxed">{item.desc}</p>
             </div>
           </div>
-        );
-      })}
-    </div>
-  </section>
-))}
+        ))}
+      </div>
+    </section>
 
-    </main>
+  </div>
 
-    <!-- Footer Component -->
-    <Footer />
-
-<script type="module">
-  document.addEventListener("DOMContentLoaded", () => {
-    // ================= XỬ LÝ THÊM VÀO GIỎ HÀNG =================
-    const getCart = () => {
-      try { return JSON.parse(localStorage.getItem("cart") || "[]"); } catch { return []; }
-    };
-
-    const saveCart = (cart) => {
-      localStorage.setItem("cart", JSON.stringify(cart));
-      window.dispatchEvent(new Event("cart-updated"));
-    };
-
-    const cartButtons = document.querySelectorAll(".add-to-cart-btn");
-
-    cartButtons.forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        const container = btn.closest("[data-product-id]");
-        if (!container) return;
-
-        const id = container.dataset.productId;
-        const name = container.dataset.name || "";
-        const image = container.dataset.image || "";
-        const sku = container.dataset.sku || "";
-        const rawOdoo = container.dataset.odooId;
-        
-        let parsedOdooId = null;
-        if (rawOdoo !== undefined && rawOdoo !== null && rawOdoo !== '' && rawOdoo !== 'null') {
-          const num = parseInt(rawOdoo, 10);
-          if (!isNaN(num)) parsedOdooId = num;
-        }
-
-        const wholesalePrice = parseFloat(container.dataset.wholesalePrice || "0");
-        const retailPrice = parseFloat(container.dataset.retailPrice || "0");
-        const activePrice = parseFloat(container.dataset.effectivePrice || "0"); 
-
-        const cart = getCart();
-        const target = cart.find(x => x.id === id);
-
-        if (target) {
-          target.quantity = (target.quantity || 1) + 1;
-          target.price = activePrice;
-          target.wholesale_price = wholesalePrice;
-          target.retail_price = retailPrice;
-          if (target.odoo_id === undefined) target.odoo_id = parsedOdooId;
-          if (!target.sku) target.sku = sku;
-        } else {
-          cart.push({
-            id,
-            odoo_id: parsedOdooId,
-            sku: sku,
-            name,
-            price: activePrice,
-            wholesale_price: wholesalePrice,
-            retail_price: retailPrice,
-            image,
-            quantity: 1
-          });
-        }
-
-        saveCart(cart);
-
-        btn.classList.add("scale-90", "bg-[#d82a72]", "text-white");
-        setTimeout(() => {
-          btn.classList.remove("scale-90", "bg-[#d82a72]", "text-white");
-        }, 200);
-      });
-    });
-  });
-</script>
-</body>
-</html>
+</BaseLayout>
